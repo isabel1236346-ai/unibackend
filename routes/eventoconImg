@@ -1,0 +1,167 @@
+import express from 'express';
+import multer from 'multer';
+import path from 'path';
+import { sequelize } from '../config/db.js'; 
+import fs from 'fs-extra';
+import { v4 as uuidv4 } from 'uuid';
+import Evento from '../models/Event.js'; 
+const router = express.Router();
+import {Event, Tipo} from '../models'; // Asegúrate de que el modelo Evento esté correctamente importado
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, 'uploads/'),
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+const upload = multer({ storage: storage });
+
+router.post('/', upload.single('imagenEvento'), async (req, res) => {
+  console.log('Petición POST a /api/eventos recibida.');
+  
+  const {
+    nombreevento, lugarevento, fechaevento, horaevento, idtipoevento, imagenEventoBase64,
+    actividadesPrevias, actividadesDurante, actividadesPost,
+    serviciosContratados, ambientes
+  } = req.body;
+
+  let imagenUrl = null;
+  try {
+    if (req.file) {
+      console.log('Imagen recibida como archivo (móvil).');
+      imagenUrl = `/uploads/${req.file.filename}`;
+    } else if (imagenEventoBase64) {
+      console.log('Imagen recibida como Base64 (web).');
+      const matches = imagenEventoBase64.match(/^data:(.+);base64,(.+)$/);
+      if (!matches || matches.length !== 3) {
+        return res.status(400).json({ message: "El formato de la imagen Base64 es inválido." });
+      }
+      
+      const mimeType = matches[1];
+      const base64Data = matches[2];
+      const extension = mimeType.split('/')[1];
+      const filename = `web-${uuidv4()}.${extension}`;
+      const filepath = path.join('uploads', filename);
+
+      await fs.outputFile(filepath, base64Data, 'base64');
+      imagenUrl = `/uploads/${filename}`;
+      console.log(`Imagen Base64 guardada en: ${filepath}`);
+    }
+  } catch (e) {
+    console.error("Error procesando la imagen:", e);
+    return res.status(500).json({ message: "Error interno al procesar la imagen.", error: e.message });
+  }
+
+  let parsedActividadesPrevias, parsedActividadesDurante, parsedActividadesPost, parsedServicios, parsedAmbientes;
+  try {
+    parsedActividadesPrevias = req.body.actividadesPrevias ? JSON.parse(req.body.actividadesPrevias) : [];
+    parsedActividadesDurante = req.body.actividadesDurante ? JSON.parse(req.body.actividadesDurante) : [];
+    parsedActividadesPost = req.body.actividadesPost ? JSON.parse(req.body.actividadesPost) : [];
+    parsedServicios = req.body.serviciosContratados ? JSON.parse(req.body.serviciosContratados) : [];
+    parsedAmbientes = req.body.ambientes ? JSON.parse(req.body.ambientes) : [];
+  } catch (e) {
+    return res.status(400).json({ message: "Error en el formato JSON de los datos de actividades, servicios o ambientes." });
+  }
+
+  const t = await sequelize.transaction();
+
+  try {
+    console.log('Transacción de Sequelize iniciada.');
+
+    const nuevoEvento = await Evento.create({
+      nombreevento,
+      lugarevento,
+      fechaevento,
+      horaevento,
+      idtipoevento,
+      imagenUrl: imagenUrl // Sequelize mapeará esto a la columna 'imagen_evento'
+    }, { transaction: t });
+
+    const nuevoEventoId = nuevoEvento.idevento;
+    console.log(`Evento principal creado con ID: ${nuevoEventoId}`);
+
+    const insertarActividades = async (listaActividades, tipo) => {
+      for (const actividad of listaActividades) {
+        await sequelize.query(
+          'INSERT INTO evento_actividades (id_evento, nombre_actividad, tipo_actividad, responsable, fecha_inicio, fecha_fin) VALUES (?, ?, ?, ?, ?, ?)',
+          { replacements: [nuevoEventoId, actividad.nombreActividad, tipo, actividad.responsable, actividad.fechaInicio, actividad.fechaFin], transaction: t }
+        );
+      }
+    };
+    await insertarActividades(parsedActividadesPrevias, 'previa');
+    await insertarActividades(parsedActividadesDurante, 'durante');
+    await insertarActividades(parsedActividadesPost, 'post');
+    console.log('Actividades insertadas.');
+
+    for (const servicio of parsedServicios) {
+      await sequelize.query(
+        'INSERT INTO evento_servicios (id_evento, nombre_servicio, caracteristicas, fecha_entrega, observaciones) VALUES (?, ?, ?, ?, ?)',
+        { replacements: [nuevoEventoId, servicio.nombreServicio, servicio.caracteristica, servicio.fechaInicio, servicio.observaciones], transaction: t }
+      );
+    }
+    console.log('Servicios insertados.');
+
+    for (const ambiente of parsedAmbientes) {
+      await sequelize.query(
+        'INSERT INTO evento_ambientes (id_evento, nombre_ambiente, requisito, observaciones) VALUES (?, ?, ?, ?)',
+        { replacements: [nuevoEventoId, ambiente.nombre, ambiente.requisito, ambiente.observaciones], transaction: t }
+      );
+    }
+    console.log('Ambientes insertados.');
+
+    await t.commit();
+    console.log('Transacción completada (commit).');
+    
+    return res.status(201).json({ message: 'Evento creado exitosamente', eventoId: nuevoEventoId });
+
+  } catch (error) {
+    await t.rollback();
+    console.error('Error en la transacción de Sequelize, se hizo rollback:', error);
+    return res.status(500).json({ message: 'Error interno del servidor al crear el evento.', error: error.message });
+  }
+});
+
+router.get('/', async (req, res) => {
+  try {
+    const [eventos, metadata] = await sequelize.query(
+      "SELECT idevento, nombreevento, lugarevento, fechaevento, horaevento FROM evento ORDER BY fechaevento DESC"
+    );
+    res.status(200).json(eventos);
+  } catch (error) {
+    console.error("Error al obtener los eventos:", error);
+    res.status(500).json({ message: "Error interno del servidor al obtener los eventos." });
+  }
+});
+
+router.get('/reporte/estadisticas', async (req, res) => {
+});
+
+router.post('/', async (req, res) => {
+  const t= await sequelize.transaction();
+  try {
+    const { nombreevento, 
+            lugarevento,
+            fechaevento,
+            horaevento,
+            tipoevento,
+            idtipoevento } = req.body;
+
+    const nuevoEvento = await Evento.create({
+      nombreevento,
+      lugarevento,
+      fechaevento,
+      horaevento,
+      idtipoevento
+    }, { transaction: t });
+
+    await t.commit();
+    res.status(201).json({ message: 'Evento creado exitosamente', eventoId: nuevoEvento.idevento });
+  } catch (error) {
+    await t.rollback();
+    console.error("Error al crear el evento:", error);
+    res.status(500).json({ message: "Error interno del servidor al crear el evento.", error: error.message });
+  }
+
+});
+
+export default router;
