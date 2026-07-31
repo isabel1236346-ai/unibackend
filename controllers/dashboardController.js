@@ -1,5 +1,5 @@
 const { getModels } = require('../models/index.js');
-const { Op } = require('sequelize');
+const { Op,QueryTypes } = require('sequelize');
 const asyncHandler = require('express-async-handler');
 
 const getDashboardStats = asyncHandler(async (req, res) => {
