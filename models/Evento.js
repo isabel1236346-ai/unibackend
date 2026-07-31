@@ -111,7 +111,7 @@ module.exports = (sequelize, DataTypes) => {
     }
   }, {
     tableName: 'evento',
-    timestamps: false
+    timestamps: true
   });
 
   Evento.associate = function(models) {
