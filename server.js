@@ -24,14 +24,14 @@ console.log('🔍 [DEBUG] FRONTEND_PATH:', FRONTEND_PATH, '| Existe:', frontendE
 
   const allowedOrigins = [
   'https://unibackend-production.up.railway.app',
-  'https://frontendgestion-production-d088.up.railway.app',
+  'https://unifrontend-production-150c.up.railway.app',
   'http://localhost:3000',
   'http://localhost:8081',
   'http://localhost:19006'
 ];
 
 app.use(cors({
-  origin: 'https://frontendgestion-production-d088.up.railway.app',
+  origin: 'https://unifrontend-production-150c.up.railway.app',
   //true,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
