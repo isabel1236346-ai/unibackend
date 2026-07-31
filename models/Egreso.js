@@ -47,6 +47,7 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: true,
       defaultValue: 0,
     },
+  }, {
     tableName: 'egreso',
     timestamps: false,
   });
