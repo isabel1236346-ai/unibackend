@@ -359,57 +359,85 @@ const getMyHistoricalData = asyncHandler(async (req, res) => {
 });
 
 const getMyCommitteeEvents = asyncHandler(async (req, res) => {
+  const models = getModels();
+  const { Evento, User, Academico, Facultad } = models;
+  const sequelize = models.sequelize;
+  
   try {
-    if (!req.user?.idusuario) {
-      return res.status(401).json({ error: 'No autorizado' });
-    }
-
-    const { idusuario } = req.user;
-    const { sequelize, Evento } = getModels();
-
-    const DIAS_A_MOSTRAR = 30; 
-    const fechaLimite = new Date();
-    fechaLimite.setDate(fechaLimite.getDate() - DIAS_A_MOSTRAR);
-
-    const committeeRecords = await sequelize.query(
-      `SELECT idevento, "created_at" FROM public.comite WHERE idusuario = :idusuario`,
-      { replacements: { idusuario }, type: sequelize.QueryTypes.SELECT }
+    const userId = req.user.idusuario;
+    
+    // 1. Obtener los IDs de los eventos donde el usuario es miembro del comité
+    const eventosEnComite = await sequelize.query(
+      'SELECT idevento FROM comite WHERE idusuario = ?',
+      { replacements: [userId], type: QueryTypes.SELECT }
     );
-
-    if (committeeRecords.length === 0) {
+    
+    const idsEventosComite = eventosEnComite.map(r => r.idevento);
+    
+    if (idsEventosComite.length === 0) {
       return res.status(200).json({ events: [] });
     }
 
-    const eventoIds = committeeRecords.map(record => record.idevento);
-
-    const events = await Evento.findAll({
-      where: { 
-        idevento: eventoIds,
-        fechaevento: { [Op.gte]: fechaLimite }
+    // 2. Obtener los detalles completos de esos eventos
+    const eventos = await Evento.findAll({
+      where: {
+        idevento: { [Op.in]: idsEventosComite }
       },
-      attributes: ['idevento', 'nombreevento', 'descripcion', 'fechaevento', 'estado'],
-      order: [['fechaevento', 'DESC']]
+      include: [
+        {
+          model: User,
+          as: 'academicoCreador',
+          attributes: ['idusuario', 'nombre', 'apellidopat', 'apellidomat'],
+          include: [
+            {
+              model: Academico,
+              as: 'academico',
+              attributes: ['facultad_id'],
+              include: [
+                {
+                  model: Facultad,
+                  as: 'facultad',
+                  attributes: ['nombre_facultad']
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      order: [['fechaevento', 'ASC'], ['horaevento', 'ASC']]
     });
 
-    const eventsWithAssignment = events.map(event => {
-      const assignment = committeeRecords.find(r => r.idevento === event.idevento);
+    // 3. Formatear la respuesta para que coincida con lo que espera el frontend
+    const eventosFormateados = eventos.map(event => {
+      const creador = event.academicoCreador;
+      const facultadNombre = creador?.academico?.facultad?.nombre_facultad || 'Sin facultad';
+      
       return {
-        ...event.get({ plain: true }),
-        assignedAt: assignment?.created_at,
-        role: 'comité'
+        idevento: event.idevento,
+        nombreevento: event.nombreevento || 'Sin título',
+        descripcion: event.descripcion || 'Sin descripción',
+        fechaevento: event.fechaevento,
+        horaevento: event.horaevento || 'N/A',
+        lugarevento: event.lugarevento || 'Sin ubicación',
+        estado: event.estado,
+        idacademico: event.idacademico,
+        academico: creador ? {
+          id: creador.idusuario,
+          nombre: `${creador.nombre || ''} ${creador.apellidopat || ''}`.trim()
+        } : null,
+        facultad: facultadNombre,
+        created_at: event.created_at,
+        updated_at: event.updated_at
       };
     });
 
-    res.status(200).json({ events: eventsWithAssignment });
+    res.status(200).json({ events: eventosFormateados });
+
   } catch (error) {
-    console.error('Error getMyCommitteeEvents:', error);
-    res.status(500).json({ 
-      error: 'Error al cargar eventos del comité',
-      message: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+    console.error('❌ Error en getMyCommitteeEvents:', error);
+    res.status(500).json({ error: 'Error al cargar eventos del comité', details: error.message });
   }
 });
-
 const myEvent = asyncHandler(async (req, res) => {
   if (!req.user || !req.user.idusuario) {
     console.error('Usuario no autenticado o req.user faltante');
