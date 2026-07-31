@@ -1,4 +1,5 @@
 const { getModels } = require('../models/index');
+const axios = require('axios');
 const { Op, QueryTypes } = require('sequelize');
 const asyncHandler = require('express-async-handler');
 const { sendNotification } = require('./notificationController.js');
@@ -41,8 +42,8 @@ const createEvento = async (req, res) => {
 
   try {
     const data = req.body;
-   
-          console.log('🌐 evento_externo:', data.evento_externo);
+    console.log('🌐 evento_externo:', data.evento_externo);
+    
     if (!data.nombreevento || !data.fechaevento) {
       await t.rollback();
       return res.status(400).json({ message: 'Campos requeridos: nombreevento, fechaevento' });
@@ -51,87 +52,65 @@ const createEvento = async (req, res) => {
     // 1. CREAR EVENTO PRINCIPAL
     const nuevoEvento = await Evento.create({
       nombreevento: data.nombreevento,
-      lugarevento: data.lugarevento || data.lugar || 'Por definir', // Acepta ambos nombres
+      lugarevento: data.lugarevento || data.lugar || 'Por definir',
       fechaevento: data.fechaevento,
       horaevento: data.horaevento,
       idacademico: req.user.idusuario,
       idclasificacion: data.idclasificacion || null,
       idsubcategoria: data.idsubcategoria || null,
-       evento_externo: data.evento_externo === true || data.evento_externo === 'true',
+      evento_externo: data.evento_externo === true || data.evento_externo === 'true',
       estado: 'pendiente',
       created_at: new Date(),
       updated_at: new Date(),
-      
     }, { transaction: t });
 
     const nuevoEventoId = nuevoEvento.idevento;
     console.log('✅ Evento creado con ID:', nuevoEventoId);
 
     // 2. ASIGNAR FASE
-    try {
-      const faseMaestra = await Fase.findOne({
-        where: { nrofase: 1 },
-        attributes: ['idfase', 'nrofase'],
-        transaction: t
-      });
-      if (faseMaestra) {
-        nuevoEvento.idfase = faseMaestra.idfase;
-        await nuevoEvento.save({ transaction: t });
-        console.log('✅ Fase asignada:', faseMaestra.nrofase);
-      }
-    } catch (faseError) {
-      console.warn('⚠️ No se pudo asignar fase:', faseError.message);
+    const faseMaestra = await Fase.findOne({
+      where: { nrofase: 1 },
+      attributes: ['idfase', 'nrofase'],
+      transaction: t
+    });
+    if (faseMaestra) {
+      nuevoEvento.idfase = faseMaestra.idfase;
+      await nuevoEvento.save({ transaction: t });
+      console.log('✅ Fase asignada:', faseMaestra.nrofase);
     }
 
-    // 3. INSERTAR ARGUMENTACIÓN PRIMERO (porque los objetivos la necesitan)
+    // 3. INSERTAR ARGUMENTACIÓN
     let idargumentacion = null;
     const argumentacionTexto = data.argumentacion?.trim() || data.argumentación?.trim();
     if (argumentacionTexto) {
-      try {
-        const [argResult] = await sequelize.query(
-          'INSERT INTO argumentacion (idevento, texto_argumentacion) VALUES (?, ?) RETURNING idargumentacion',
-          { replacements: [nuevoEventoId, argumentacionTexto], transaction: t }
-        );
-        idargumentacion = argResult[0]?.idargumentacion;
-        console.log('✅ Argumentación insertada con ID:', idargumentacion);
-      } catch (argError) {
-        console.error('❌ Error insertando argumentación:', argError.message);
-      }
+      const [argResult] = await sequelize.query(
+        'INSERT INTO argumentacion (idevento, texto_argumentacion) VALUES (?, ?) RETURNING idargumentacion',
+        { replacements: [nuevoEventoId, argumentacionTexto], transaction: t }
+      );
+      idargumentacion = argResult[0]?.idargumentacion;
+      console.log('✅ Argumentación insertada con ID:', idargumentacion);
     }
 
-    // 4. INSERTAR OBJETIVOS (en tabla objetivos, NO en evento_objetivos)
+    // 4. INSERTAR OBJETIVOS (Sin try-catch interno para garantizar rollback si falla)
     if (Array.isArray(data.objetivos) && data.objetivos.length > 0) {
       console.log('📝 Insertando', data.objetivos.length, 'objetivos...');
-      
       for (const objetivo of data.objetivos) {
         const idtipoobjetivo = typeof objetivo === 'number' ? objetivo : objetivo.id;
         const texto = typeof objetivo === 'object' ? (objetivo.texto_personalizado || null) : null;
 
-        try {
-          // Insertar en tabla objetivos (con idargumentacion si existe)
-          const [objResult] = await sequelize.query(
-            `INSERT INTO objetivos (idtipoobjetivo, texto_personalizado, idargumentacion) 
-             VALUES (?, ?, ?) 
-             RETURNING idobjetivo`,
-            { 
-              replacements: [idtipoobjetivo, texto, idargumentacion], 
-              transaction: t 
-            }
+        const [objResult] = await sequelize.query(
+          `INSERT INTO objetivos (idtipoobjetivo, texto_personalizado, idargumentacion) 
+           VALUES (?, ?, ?) RETURNING idobjetivo`,
+          { replacements: [idtipoobjetivo, texto, idargumentacion], transaction: t }
+        );
+        
+        const idobjetivo = objResult[0]?.idobjetivo;
+        if (idobjetivo) {
+          await sequelize.query(
+            `INSERT INTO evento_objetivos (idevento, idobjetivo) VALUES (?, ?)`,
+            { replacements: [nuevoEventoId, idobjetivo], transaction: t }
           );
-          
-          const idobjetivo = objResult[0]?.idobjetivo;
-          console.log(`✅ Objetivo tipo ${idtipoobjetivo} creado con ID: ${idobjetivo}`);
-          
-          if (idobjetivo) {
-            await sequelize.query(
-              `INSERT INTO evento_objetivos (idevento, idobjetivo) VALUES (?, ?)`,
-              { replacements: [nuevoEventoId, idobjetivo], transaction: t }
-            );
-            console.log(`✅ Objetivo ${idobjetivo} vinculado al evento ${nuevoEventoId}`);
-          }
-        } catch (objError) {
-          console.error(`❌ Error insertando objetivo tipo ${idtipoobjetivo}:`, objError.message);
-          console.error('   SQL:', objError.parent?.sql);
+          console.log(`✅ Objetivo ${idobjetivo} vinculado al evento ${nuevoEventoId}`);
         }
       }
     }
@@ -139,30 +118,19 @@ const createEvento = async (req, res) => {
     // 5. INSERTAR TIPOS DE EVENTO
     if (Array.isArray(data.tipos_de_evento) && data.tipos_de_evento.length > 0) {
       console.log('📝 Insertando', data.tipos_de_evento.length, 'tipos de evento...');
-      
       for (const tipo of data.tipos_de_evento) {
-        try {
-          // Acepta tanto 'id' como 'idtipoevento'
-          const idtipoevento = tipo.id || tipo.idtipoevento;
-          
-          await sequelize.query(
-            'INSERT INTO evento_tipos (idevento, idtipoevento, texto_personalizado) VALUES (?, ?, ?)',
-            { 
-              replacements: [nuevoEventoId, idtipoevento, tipo.texto_personalizado || null], 
-              transaction: t 
-            }
-          );
-          console.log(`✅ Tipo de evento ${idtipoevento} insertado`);
-        } catch (tipoError) {
-          console.error(`❌ Error insertando tipo de evento:`, tipoError.message);
-        }
+        const idtipoevento = tipo.id || tipo.idtipoevento;
+        await sequelize.query(
+          'INSERT INTO evento_tipos (idevento, idtipoevento, texto_personalizado) VALUES (?, ?, ?)',
+          { replacements: [nuevoEventoId, idtipoevento, tipo.texto_personalizado || null], transaction: t }
+        );
+        console.log(`✅ Tipo de evento ${idtipoevento} insertado`);
       }
     }
 
     // 6. INSERTAR SEGMENTOS
     if (Array.isArray(data.segmentos_objetivo) && data.segmentos_objetivo.length > 0) {
       console.log('📝 Insertando', data.segmentos_objetivo.length, 'segmentos...');
-      
       const segmentosUnicos = new Map();
       data.segmentos_objetivo.forEach(segmento => {
         if (!segmentosUnicos.has(segmento.id)) {
@@ -171,103 +139,68 @@ const createEvento = async (req, res) => {
       });
 
       for (const segmento of segmentosUnicos.values()) {
-        try {
-          const [existing] = await sequelize.query(
-            'SELECT 1 FROM evento_segmento WHERE idevento = ? AND idsegmento = ?',
-            { replacements: [nuevoEventoId, segmento.id], transaction: t }
-          );
-
-          if (existing.length === 0) {
-            await sequelize.query(
-              'INSERT INTO evento_segmento (idevento, idsegmento, texto_personalizado) VALUES (?, ?, ?)',
-              { replacements: [nuevoEventoId, segmento.id, segmento.texto_personalizado || null], transaction: t }
-            );
-            console.log(`✅ Segmento ${segmento.id} vinculado`);
-          } else {
-            console.log(`ℹ️ Segmento ${segmento.id} ya existe, omitiendo`);
-          }
-        } catch (segError) {
-          console.error(`❌ Error insertando segmento ${segmento.id}:`, segError.message);
-        }
+        await sequelize.query(
+          'INSERT INTO evento_segmento (idevento, idsegmento, texto_personalizado) VALUES (?, ?, ?)',
+          { replacements: [nuevoEventoId, segmento.id, segmento.texto_personalizado || null], transaction: t }
+        );
+        console.log(`✅ Segmento ${segmento.id} vinculado`);
       }
     }
 
     // 7. INSERTAR OBJETIVOS PDI
     if (Array.isArray(data.objetivos_pdi) && data.objetivos_pdi.length > 0) {
-      const descripcionesValidas = data.objetivos_pdi
-        .filter(d => d && d.trim() !== '')
-        .slice(0, 3);
-      
+      const descripcionesValidas = data.objetivos_pdi.filter(d => d && d.trim() !== '').slice(0, 3);
       for (const descripcion of descripcionesValidas) {
-        try {
-          await sequelize.query(
-            'INSERT INTO evento_pdi (idevento, descripcion) VALUES (?, ?)',
-            { replacements: [nuevoEventoId, descripcion], transaction: t }
-          );
-        } catch (pdiError) {
-          console.error('❌ Error insertando PDI:', pdiError.message);
-        }
+        await sequelize.query(
+          'INSERT INTO evento_pdi (idevento, descripcion) VALUES (?, ?)',
+          { replacements: [nuevoEventoId, descripcion], transaction: t }
+        );
       }
       console.log('✅ Objetivos PDI insertados:', descripcionesValidas.length);
     }
 
     // 8. INSERTAR RESULTADOS
-    try {
-      const resultados = typeof data.resultados_esperados === 'string'
-        ? JSON.parse(data.resultados_esperados)
-        : (data.resultados_esperados || {});
+    const resultados = typeof data.resultados_esperados === 'string'
+      ? JSON.parse(data.resultados_esperados)
+      : (data.resultados_esperados || {});
 
-      console.log('📝 Insertando resultados:', resultados);
-
-      await sequelize.query(
-        'INSERT INTO resultado (idevento, participacion_esperada, satisfaccion_esperada, otros_resultados) VALUES (?, ?, ?, ?)',
-        {
-          replacements: [
-            nuevoEventoId,
-            parseInt(resultados.participacion, 10) || 0,
-            resultados.satisfaccion || null,
-            resultados.otro || null
-          ],
-          transaction: t
-        }
-      );
-      console.log('✅ Resultados insertados');
-    } catch (resError) {
-      console.error('❌ Error insertando resultados:', resError.message);
-    }
+    await sequelize.query(
+      'INSERT INTO resultado (idevento, participacion_esperada, satisfaccion_esperada, otros_resultados) VALUES (?, ?, ?, ?)',
+      {
+        replacements: [
+          nuevoEventoId,
+          parseInt(resultados.participacion, 10) || 0,
+          resultados.satisfaccion || null,
+          resultados.otro || null
+        ],
+        transaction: t
+      }
+    );
+    console.log('✅ Resultados insertados');
 
     // 9. INSERTAR RECURSOS EXISTENTES
     if (Array.isArray(data.recursos_existentes) && data.recursos_existentes.length > 0) {
-      for (const idrecurso of data.recursos_existentes) {
-        try {
-          await sequelize.query(
-            'INSERT INTO evento_recurso (idevento, idrecurso) VALUES (?, ?)',
-            { replacements: [nuevoEventoId, idrecurso], transaction: t }
-          );
-        } catch (recError) {
-          console.error(`❌ Error vinculando recurso ${idrecurso}:`, recError.message);
-        }
-      }
+      const recursosData = data.recursos_existentes.map(id => [nuevoEventoId, id]);
+      await sequelize.query(
+        `INSERT INTO evento_recurso (idevento, idrecurso) VALUES ${recursosData.map(() => '(?, ?)').join(', ')}`,
+        { replacements: recursosData.flat(), transaction: t }
+      );
       console.log('✅ Recursos existentes vinculados:', data.recursos_existentes.length);
     }
 
     // 10. INSERTAR RECURSOS NUEVOS
     if (Array.isArray(data.recursos_nuevos) && data.recursos_nuevos.length > 0) {
       for (const recurso of data.recursos_nuevos) {
-        try {
-          const [result] = await sequelize.query(
-            'INSERT INTO recurso (nombre_recurso, recurso_tipo, cantidad, habilitado) VALUES (?, ?, ?, ?) RETURNING idrecurso',
-            { replacements: [recurso.nombre_recurso, recurso.recurso_tipo, recurso.cantidad || 1, true], transaction: t }
+        const [result] = await sequelize.query(
+          'INSERT INTO recurso (nombre_recurso, recurso_tipo, cantidad, habilitado) VALUES (?, ?, ?, ?) RETURNING idrecurso',
+          { replacements: [recurso.nombre_recurso, recurso.recurso_tipo, recurso.cantidad || 1, true], transaction: t }
+        );
+        const nuevoIdRecurso = result[0]?.idrecurso;
+        if (nuevoIdRecurso) {
+          await sequelize.query(
+            'INSERT INTO evento_recurso (idevento, idrecurso) VALUES (?, ?)',
+            { replacements: [nuevoEventoId, nuevoIdRecurso], transaction: t }
           );
-          const nuevoIdRecurso = result[0]?.idrecurso;
-          if (nuevoIdRecurso) {
-            await sequelize.query(
-              'INSERT INTO evento_recurso (idevento, idrecurso) VALUES (?, ?)',
-              { replacements: [nuevoEventoId, nuevoIdRecurso], transaction: t }
-            );
-          }
-        } catch (recError) {
-          console.error('❌ Error creando recurso nuevo:', recError.message);
         }
       }
       console.log('✅ Recursos nuevos creados:', data.recursos_nuevos.length);
@@ -275,74 +208,63 @@ const createEvento = async (req, res) => {
 
     // 11. INSERTAR PRESUPUESTO
     if (data.presupuesto) {
-      try {
-        console.log('📝 Insertando presupuesto...');
-        
-        const presupuesto = await Presupuesto.create({
-          idevento: nuevoEventoId,
-          total_egresos: parseFloat(data.presupuesto.total_egresos) || 0,
-          total_ingresos: parseFloat(data.presupuesto.total_ingresos) || 0,
-          balance: parseFloat(data.presupuesto.balance) || 0,
-        }, { transaction: t });
+      console.log('📝 Insertando presupuesto...');
+      const presupuesto = await Presupuesto.create({
+        idevento: nuevoEventoId,
+        total_egresos: parseFloat(data.presupuesto.total_egresos) || 0,
+        total_ingresos: parseFloat(data.presupuesto.total_ingresos) || 0,
+        balance: parseFloat(data.presupuesto.balance) || 0,
+      }, { transaction: t });
 
-        console.log('✅ Presupuesto creado con ID:', presupuesto.idpresupuesto);
+      console.log('✅ Presupuesto creado con ID:', presupuesto.idpresupuesto);
 
-        const egresosValidos = (data.presupuesto.egresos || []).filter(e => e.descripcion?.trim());
-        if (egresosValidos.length > 0) {
-          await Egreso.bulkCreate(
-            egresosValidos.map(e => ({
-              idpresupuesto: presupuesto.idpresupuesto,
-              descripcion: e.descripcion,
-              cantidad: parseFloat(e.cantidad) || 0,
-              precio_unitario: parseFloat(e.precio_unitario) || 0,
-              total: parseFloat(e.total) || 0,
-            })),
-            { transaction: t }
-          );
-          console.log(`✅ ${egresosValidos.length} egresos insertados`);
-        }
+      const egresosValidos = (data.presupuesto.egresos || []).filter(e => e.descripcion?.trim());
+      if (egresosValidos.length > 0) {
+        await Egreso.bulkCreate(
+          egresosValidos.map(e => ({
+            idpresupuesto: presupuesto.idpresupuesto,
+            descripcion: e.descripcion,
+            cantidad: parseFloat(e.cantidad) || 0,
+            precio_unitario: parseFloat(e.precio_unitario) || 0,
+            total: parseFloat(e.total) || 0,
+          })),
+          { transaction: t }
+        );
+        console.log(`✅ ${egresosValidos.length} egresos insertados`);
+      }
 
-        const ingresosValidos = (data.presupuesto.ingresos || []).filter(i => i.descripcion?.trim());
-        if (ingresosValidos.length > 0) {
-          await Ingreso.bulkCreate(
-            ingresosValidos.map(i => ({
-              idpresupuesto: presupuesto.idpresupuesto,
-              descripcion: i.descripcion,
-              cantidad: parseFloat(i.cantidad) || 0,
-              precio_unitario: parseFloat(i.precio_unitario) || 0,
-              total: parseFloat(i.total) || 0,
-            })),
-            { transaction: t }
-          );
-          console.log(`✅ ${ingresosValidos.length} ingresos insertados`);
-        }
-      } catch (presError) {
-        console.error('❌ Error insertando presupuesto:', presError.message);
+      const ingresosValidos = (data.presupuesto.ingresos || []).filter(i => i.descripcion?.trim());
+      if (ingresosValidos.length > 0) {
+        await Ingreso.bulkCreate(
+          ingresosValidos.map(i => ({
+            idpresupuesto: presupuesto.idpresupuesto,
+            descripcion: i.descripcion,
+            cantidad: parseFloat(i.cantidad) || 0,
+            precio_unitario: parseFloat(i.precio_unitario) || 0,
+            total: parseFloat(i.total) || 0,
+          })),
+          { transaction: t }
+        );
+        console.log(`✅ ${ingresosValidos.length} ingresos insertados`);
       }
     }
 
     // 12. INSERTAR COMITÉ
     if (Array.isArray(data.comite) && data.comite.length > 0) {
       console.log('📝 Insertando comité con', data.comite.length, 'miembros...');
-      
-      for (const idusuario of data.comite) {
-        try {
-          await sequelize.query(
-            'INSERT INTO comite (idevento, idusuario, created_at) VALUES (?, ?, NOW())',
-            { replacements: [nuevoEventoId, idusuario], transaction: t }
-          );
-          console.log(`✅ Miembro ${idusuario} agregado al comité`);
-        } catch (comError) {
-          console.error(`❌ Error agregando miembro ${idusuario}:`, comError.message);
-        }
-      }
+      const comiteData = data.comite.map(idusuario => [nuevoEventoId, idusuario]);
+      await sequelize.query(
+        `INSERT INTO comite (idevento, idusuario, created_at) VALUES ${comiteData.map(() => '(?, ?, NOW())').join(', ')}`,
+        { replacements: comiteData.flat(), transaction: t }
+      );
+      console.log('✅ Comité insertado:', data.comite.length, 'miembros');
     }
 
-    // 13. COMMIT FINAL
+    // 13. COMMIT FINAL (Solo si TODO lo anterior fue exitoso)
     await t.commit();
     console.log('✅✅✅ Transacción completada exitosamente ✅✅✅\n');
 
-    // 14. ENVIAR NOTIFICACIONES (fuera de la transacción)
+    // 14. ENVIAR NOTIFICACIONES (Fuera de la transacción)
     if (Array.isArray(data.comite) && data.comite.length > 0) {
       for (const idusuario of data.comite) {
         try {
@@ -365,7 +287,11 @@ const createEvento = async (req, res) => {
       lugarevento: nuevoEvento.lugarevento,
       responsable_evento: req.user?.nombre || 'No especificado'
     };
-    enviarNotificacionTelegram(eventoParaNotificar, 'nuevo');
+    
+    // Llamada asíncrona sin await para no bloquear la respuesta
+    enviarNotificacionTelegram(eventoParaNotificar, 'nuevo').catch(err => 
+      console.warn('⚠️ Error en notificación Telegram:', err.message)
+    );
 
     return res.status(201).json({
       message: 'Evento creado exitosamente',
@@ -373,6 +299,7 @@ const createEvento = async (req, res) => {
     });
 
   } catch (error) {
+    // Si CUALQUIER cosa falla, se deshace TODO
     if (!t.finished) {
       await t.rollback();
     }
@@ -386,6 +313,7 @@ const createEvento = async (req, res) => {
     });
   } 
 };
+
 const getAllEventos = async (req, res) => {
   const models = getModels();
   const sequelize = models.sequelize;
