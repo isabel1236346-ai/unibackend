@@ -799,7 +799,9 @@ const unlinkTelegram = asyncHandler(async (req, res) => {
     const user = await User.findByPk(userId,{
       attributes: [
         'idusuario', 'nombre', 'apellidopat',
-        'apellidomat', 'email', 'role', 'facultad_id', 'telegram_chat_id', 'telegram_username'],
+        'apellidomat', 'email', 'role', 'facultad_id', 'telegram_chat_id', 'telegram_username',
+        'theme'
+      ],
       include: [
         {
           model: Facultad,
@@ -823,7 +825,8 @@ const unlinkTelegram = asyncHandler(async (req, res) => {
       facultad: user.facultad?.nombre_facultad || 'Sin facultad',
       facultad_id: user.facultad_id,
       telegram_chat_id: user.telegram_chat_id,
-      telegram_username: user.telegram_username
+      telegram_username: user.telegram_username,
+      theme: user.theme || 'light' // Valor por defecto si no está definido
     });
 
   } catch (error) {
