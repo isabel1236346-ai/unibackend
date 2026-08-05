@@ -189,7 +189,9 @@ const getUserProfile = asyncHandler(async (req, res) => {
       facultad: user.facultad?.nombre_facultad || 'Sin facultad',
       facultad_id: user.facultad_id,
       telegram_chat_id: user.telegram_chat_id,
-      telegram_username: user.telegram_username
+      telegram_username: user.telegram_username,
+      theme: user.theme || 'light', // Valor por defecto si no está definido
+      color_acento: user.color_acento || '#E95A0C' // Valor por defecto si no está definido
     });
   } catch (error) {
     res.status(500).json({ message: 'Error al obtener perfil', error: error.message });
@@ -384,13 +386,15 @@ const updateUser = asyncHandler(async (req, res) => {
       contrasenia, 
       idcarrera, 
       idfacultad,
-      theme // ✅ Ya lo tienes aquí, ¡perfecto!
+      theme,
+      color_acento,
     } = req.body;
 
     console.log('🔥 [updateUser] ID:', id);
     console.log('🔥 [updateUser] idfacultad recibido:', idfacultad);
     console.log('🔥 [updateUser] idcarrera recibido:', idcarrera);
     console.log('🔥 [updateUser] theme recibido:', theme);
+    console.log('🔥 [updateUser] color_acento recibido:', color_acento);
 
     if (!id) {
       return res.status(400).json({ message: 'ID de usuario requerido' });
@@ -431,13 +435,24 @@ const updateUser = asyncHandler(async (req, res) => {
       user.contrasenia = contrasenia.trim();
     }
 
-    // ✅ ✅ ✅ AGREGA ESTO: Actualizar el tema si viene en la petición ✅ ✅ ✅
+    // ✅ Actualizar el tema si viene en la petición
     if (theme !== undefined) {
       if (theme === 'light' || theme === 'dark') {
         user.theme = theme;
         console.log('🎨 Actualizando tema del usuario a:', theme);
       } else {
         console.warn('⚠️ Valor de tema no válido recibido:', theme);
+      }
+    }
+
+    // ✅ Actualizar el color de acento si viene en la petición
+    if (color_acento !== undefined) {
+      const hexRegex = /^#[0-9A-Fa-f]{6}$/;
+      if (hexRegex.test(color_acento)) {
+        user.color_acento = color_acento;
+        console.log('🎨 Actualizando color de acento del usuario a:', color_acento);
+      } else {
+        console.warn('⚠️ Valor de color_acento no válido recibido:', color_acento);
       }
     }
 
@@ -506,7 +521,8 @@ const updateUser = asyncHandler(async (req, res) => {
         facultad_id_usuario: updatedUser.facultad_id,
         idcarrera_enviado: idcarrera,
         idfacultad_enviado: idfacultad,
-        theme_guardado: updatedUser.theme // ✅ Agregado para confirmar en el frontend
+        theme_guardado: updatedUser.theme,
+        color_acento_guardado: updatedUser.color_acento
       }
     });
 
@@ -800,7 +816,7 @@ const unlinkTelegram = asyncHandler(async (req, res) => {
       attributes: [
         'idusuario', 'nombre', 'apellidopat',
         'apellidomat', 'email', 'role', 'facultad_id', 'telegram_chat_id', 'telegram_username',
-        'theme'
+        'theme','color_acento'
       ],
       include: [
         {
@@ -826,7 +842,8 @@ const unlinkTelegram = asyncHandler(async (req, res) => {
       facultad_id: user.facultad_id,
       telegram_chat_id: user.telegram_chat_id,
       telegram_username: user.telegram_username,
-      theme: user.theme || 'light' // Valor por defecto si no está definido
+      theme: user.theme || 'light', // Valor por defecto si no está definido
+      color_acento: user.color_acento || '#E95A0C' // Valor por defecto si no está definido
     });
 
   } catch (error) {
@@ -889,6 +906,8 @@ const getUserMe = asyncHandler(async (req, res) => {
       email: user.email,
       role: user.role,
       habilitado: user.habilitado,
+      theme: user.theme || 'light',
+      color_acento: user.color_acento || '#E95A0C'
     });
   } catch (error) {
     console.error('Error en getUserMe:', error);

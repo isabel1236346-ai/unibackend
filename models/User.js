@@ -107,7 +107,12 @@ module.exports = (sequelize,DataTypes) => {
     allowNull: false,
     defaultValue: 'light',
     Comment: 'preferencia de tema del usuario: light, dark o system'
-  }
+  },
+  color_acento: {
+  type: DataTypes.STRING(7),
+  defaultValue: '#E95A0C',
+  allowNull: true,
+},
   },
   {
     tableName: 'usuario',
