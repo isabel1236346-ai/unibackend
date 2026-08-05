@@ -370,15 +370,27 @@ const updateUserDaf = asyncHandler(async (req, res) => {
 
 const updateUser = asyncHandler(async (req, res) => {
   const models = getModels();
-  const {User, Academico, Estudiante} = models;
+  const { User, Academico, Estudiante } = models;
   
   try {
     const { id } = req.params;
-    const { username, nombre, apellidopat, apellidomat, email, habilitado, contrasenia, idcarrera, idfacultad } = req.body;
+    const { 
+      username, 
+      nombre, 
+      apellidopat, 
+      apellidomat, 
+      email, 
+      habilitado, 
+      contrasenia, 
+      idcarrera, 
+      idfacultad,
+      theme // ✅ Ya lo tienes aquí, ¡perfecto!
+    } = req.body;
 
     console.log('🔥 [updateUser] ID:', id);
     console.log('🔥 [updateUser] idfacultad recibido:', idfacultad);
     console.log('🔥 [updateUser] idcarrera recibido:', idcarrera);
+    console.log('🔥 [updateUser] theme recibido:', theme);
 
     if (!id) {
       return res.status(400).json({ message: 'ID de usuario requerido' });
@@ -403,24 +415,30 @@ const updateUser = asyncHandler(async (req, res) => {
     if (email) user.email = email;
 
     if (habilitado !== undefined) {
-  let valorHabilitado;
-  
-  if (typeof habilitado === 'string') {
-    valorHabilitado = (habilitado === 'true' || habilitado === '1' || habilitado === 't') ? 'true' : 'false';
-  } else if (typeof habilitado === 'boolean') {
-    valorHabilitado = habilitado ? 'true' : 'false';
-  } else {
-    valorHabilitado = habilitado ? 'true' : 'false';
-  }
-  
-  console.log('📝 Actualizando habilitado a:', valorHabilitado);
-  user.habilitado = valorHabilitado;
-}
+      let valorHabilitado;
+      if (typeof habilitado === 'string') {
+        valorHabilitado = (habilitado === 'true' || habilitado === '1' || habilitado === 't') ? 'true' : 'false';
+      } else if (typeof habilitado === 'boolean') {
+        valorHabilitado = habilitado ? 'true' : 'false';
+      } else {
+        valorHabilitado = habilitado ? 'true' : 'false';
+      }
+      console.log('📝 Actualizando habilitado a:', valorHabilitado);
+      user.habilitado = valorHabilitado;
+    }
 
     if (contrasenia && contrasenia.trim() !== '') {
-      //const salt = await bcrypt.genSalt(10);
-      user.contrasenia =contrasenia.trim();
-      // await bcrypt.hash(contrasenia, salt);
+      user.contrasenia = contrasenia.trim();
+    }
+
+    // ✅ ✅ ✅ AGREGA ESTO: Actualizar el tema si viene en la petición ✅ ✅ ✅
+    if (theme !== undefined) {
+      if (theme === 'light' || theme === 'dark') {
+        user.theme = theme;
+        console.log('🎨 Actualizando tema del usuario a:', theme);
+      } else {
+        console.warn('⚠️ Valor de tema no válido recibido:', theme);
+      }
     }
 
     // ✅ ACTUALIZAR facultad_id en tabla usuario (si existe la columna)
@@ -429,7 +447,7 @@ const updateUser = asyncHandler(async (req, res) => {
       user.facultad_id = idfacultad;
     }
 
-    await user.save();
+    await user.save(); // <-- Aquí es donde se guarda user.theme en la base de datos
     console.log('✅ Usuario guardado correctamente');
 
     // ✅ ACTUALIZAR/CREAR registro en academico o estudiante
@@ -439,11 +457,9 @@ const updateUser = asyncHandler(async (req, res) => {
       let academico = await Academico.findOne({ where: { idusuario: id } });
       
       if (academico) {
-        // Actualizar existente
         console.log('✏️ Actualizando registro existente en academico');
         academico.idcarrera = idcarrera;
         
-        // Verificar si la columna existe antes de asignar
         if (academico.facultad_id !== undefined) {
           academico.facultad_id = idfacultad;
           console.log('📝 academico.facultad_id =', idfacultad);
@@ -452,7 +468,6 @@ const updateUser = asyncHandler(async (req, res) => {
         await academico.save();
         console.log('✅ Academico actualizado:', academico.toJSON());
       } else {
-        // Crear nuevo
         console.log('➕ Creando nuevo registro en academico');
         academico = await Academico.create({
           idusuario: id,
@@ -490,7 +505,8 @@ const updateUser = asyncHandler(async (req, res) => {
       debug: {
         facultad_id_usuario: updatedUser.facultad_id,
         idcarrera_enviado: idcarrera,
-        idfacultad_enviado: idfacultad
+        idfacultad_enviado: idfacultad,
+        theme_guardado: updatedUser.theme // ✅ Agregado para confirmar en el frontend
       }
     });
 

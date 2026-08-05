@@ -101,6 +101,12 @@ module.exports = (sequelize,DataTypes) => {
     type: DataTypes.STRING,
     allowNull: true,
     defaultValue: null
+  },
+  theme:{
+    type: DataTypes.STRING,
+    allowNull: false,
+    defaultValue: 'light',
+    Comment: 'preferencia de tema del usuario: light, dark o system'
   }
   },
   {
