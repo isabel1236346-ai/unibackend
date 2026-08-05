@@ -265,16 +265,20 @@ const updateUserDaf = asyncHandler(async (req, res) => {
     const requestingUserId = req.user.idusuario; // ID del usuario que hace la petición (viene del token)
     const requestingUserRole = req.user.role;    // Rol del usuario que hace la petición
 
-    const { username, nombre, apellidopat, apellidomat, email, habilitado, contrasenia, idcarrera, idfacultad } = req.body;
+    const { username, nombre,
+       apellidopat, apellidomat,
+        email, habilitado, contrasenia, idcarrera, idfacultad, theme, color_acento } = req.body;
 
-    console.log('🔥 [updateUser] Solicitante ID:', requestingUserId, 'Rol:', requestingUserRole);
-    console.log('🔥 [updateUser] Target ID:', targetUserId);
+      console.log('🔥 [updateUserDaf] Solicitante ID:', requestingUserId, 'Rol:', requestingUserRole);
+    console.log('🔥 [updateUserDaf] Target ID:', targetUserId);
+    console.log('🔥 [updateUserDaf] theme recibido:', theme);
+    console.log('🔥 [updateUserDaf] color_acento recibido:', color_acento);
+
 
     if (!targetUserId) {
       return res.status(400).json({ message: 'ID de usuario requerido' });
     }
 
-    // 🔒 VALIDACIÓN DE PERMISOS: Solo Admin o el propio usuario pueden editar
     if (requestingUserRole !== 'admin' && requestingUserId !== targetUserId) {
       return res.status(403).json({ 
         message: "Acceso denegado. No tienes permisos para editar este usuario." 
@@ -312,14 +316,26 @@ const updateUserDaf = asyncHandler(async (req, res) => {
       user.contrasenia = contrasenia.trim(); // El hook beforeUpdate de Sequelize lo hasheará
     }
 
-    // ⚠️ SEGURIDAD: Solo un Admin puede cambiar facultad/carrera. 
-    // Si es DAF editando su propio perfil, ignoramos estos campos.
     if (requestingUserRole === 'admin') {
       if (user.role === 'academico' && idfacultad) {
         user.facultad_id = idfacultad;
       }
+      }
+
+       if (theme !== undefined) {
+      if (theme === 'light' || theme === 'dark') {
+        user.theme = theme;
+        console.log('🎨 [updateUserDaf] Actualizando tema a:', theme);
+      }
     }
 
+    if (color_acento !== undefined) {
+      const hexRegex = /^#[0-9A-Fa-f]{6}$/;
+      if (hexRegex.test(color_acento)) {
+        user.color_acento = color_acento;
+        console.log('🎨 [updateUserDaf] Actualizando color de acento a:', color_acento);
+      }
+    }
     await user.save();
     console.log('✅ Usuario guardado correctamente');
 
