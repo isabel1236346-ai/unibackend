@@ -1,10 +1,8 @@
-// backend/routes/layoutsRoutes.js
-const express = require('express');
-const router = express.Router();
-const { crearLayout, obtenerLayouts } = require('../controllers/layoutsController.js');
-const { uploadLayout } = require('../middleware/upload.js'); // ← llaves {}
+const router = require('express').Router();
+const { uploadLayout } = require('../middleware/multer'); 
+const { crearLayout } = require('../controllers/layoutsController');
+const { protect } = require('../middleware/authMiddleware'); 
 
-router.post('/', uploadLayout.single('imagen'), crearLayout);
-router.get('/', obtenerLayouts);
+router.post('/', protect, uploadLayout.single('imagen'), crearLayout);
 
 module.exports = router;
