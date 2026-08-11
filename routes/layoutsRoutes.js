@@ -1,5 +1,5 @@
 const router = require('express').Router();
-const { uploadLayout } = require('../middleware/upload');  // ✅ Importación por nombre, varias cosas
+const { uploadLayout } = require('../middleware/multer');  // ✅ Importación por nombre, varias cosas
 const { crearLayout } = require('../controllers/layoutsController');
 const { protect } = require('../middleware/authMiddleware'); 
 
