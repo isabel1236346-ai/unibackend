@@ -2,20 +2,35 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-// Ruta ABSOLUTA: funciona sin importar desde dónde ejecutes node
+// 📁 Carpeta donde caerán los layouts: uploads/layouts/
 const uploadsDir = path.join(__dirname, '..', 'uploads');
-if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+const layoutsDir = path.join(__dirname, '..', 'uploads', 'layouts');
 
+// Crear carpetas si no existen
+[uploadsDir, layoutsDir].forEach(dir => {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+});
+
+// 💾 Storage: guarda en uploads/layouts/ con nombre único
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadsDir),
+  destination: (req, file, cb) => cb(null, layoutsDir), // 👈 uploads/layouts/
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname) || '.jpg';
     cb(null, `layout-${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`);
   },
 });
 
+// 🖼️ Solo imágenes
 const fileFilter = (req, file, cb) => {
-  cb(null, ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype));
+  const ok = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.mimetype);
+  cb(ok ? null : new Error('Solo se permiten imágenes'), ok);
 };
 
-module.exports = multer({ storage, fileFilter, limits: { fileSize: 10 * 1024 * 1024 } });
+// ✅ ESTA ES LA VARIABLE QUE FALTABA DECLARAR
+const uploadLayout = multer({
+  storage,
+  fileFilter,
+  limits: { fileSize: 10 * 1024 * 1024 } // 10 MB
+});
+
+module.exports = uploadLayout;
