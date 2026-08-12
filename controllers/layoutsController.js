@@ -87,7 +87,30 @@ const obtenerLayouts = asyncHandler(async (req, res) => {
   res.json(layoutsConUrlCompleta);
 });
 
+const eliminarLayout = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const models = getModels();
+  const { Layout } = models;
+
+  const layout = await Layout.findByPk(id);
+
+  if (!layout) {
+    return res.status(404).json({ success: false, message: 'Layout no encontrado' });
+  }
+
+  // Intentar borrar el archivo físico (si no existe, no rompe el flujo)
+  const filePath = path.join(__dirname, '..', 'uploads', layout.url_imagen);
+  fs.unlink(filePath, (err) => {
+    if (err) console.warn('⚠️ No se pudo borrar el archivo físico:', err.message);
+  });
+
+  await layout.destroy();
+
+  res.json({ success: true, message: 'Layout eliminado correctamente' });
+});
 module.exports = {
   crearLayout,
-  obtenerLayouts
+  obtenerLayouts,
+  eliminarLayout
 };

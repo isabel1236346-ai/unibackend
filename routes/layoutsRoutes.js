@@ -3,7 +3,7 @@ const router = require('express').Router();
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const { crearLayout, obtenerLayouts } = require('../controllers/layoutsController');
+const { crearLayout, obtenerLayouts,eliminarLayout } = require('../controllers/layoutsController');
 const { protect } = require('../middleware/authMiddleware');
 
 // 📂 Crear carpeta uploads/layouts si no existe
@@ -34,5 +34,6 @@ const uploadLayout = multer({
 // 🛣️ Rutas
 router.post('/', protect, uploadLayout.single('imagen'), crearLayout);
 router.get('/', protect, obtenerLayouts);
+router.delete('/:id', protect, eliminarLayout);
 
 module.exports = router;
