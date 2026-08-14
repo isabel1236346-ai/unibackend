@@ -574,10 +574,8 @@ const telegramWebhook = async (req, res) => {
   }
 
   try {
-    // ============================================
-    // 🔄 SOLUCIÓN 2: PROCESAR BOTONES INLINE (va PRIMERO)
-    // ============================================
-    if (isCallback && text.startsWith('pdf_')) {
+   
+        if (isCallback && text.startsWith('pdf_')) {
       const idevento = text.replace('pdf_', '');
       const models = getModels();
       const { User, Evento, Academico, Facultad } = models;
@@ -594,25 +592,31 @@ const telegramWebhook = async (req, res) => {
         return res.status(200).send('OK');
       }
 
-      const evento = await Evento.findOne({
-        where: { 
-          idevento: idevento,
-          idacademico: usuario.idusuario 
-        },
-        include: [
-          { association: 'academicoCreador', include: [{ association: 'academico', include: ['facultad'] }] },
-          { association: 'comite' },
-          { association: 'Recursos' },
-          { association: 'Resultados' },
-          { association: 'Objetivos' },
-          { association: 'tiposDeEvento' },
-          { association: 'fases' },
-          { association: 'Layout' },
-          { association: 'clasificacion' },
-          { association: 'subcategoria' },
-          { association: 'creador' }
-        ]
-      });
+      // 1️ Intento con asociaciones comprobadas que SÍ funcionan
+      let evento = null;
+      try {
+        evento = await Evento.findOne({
+          where: { idevento: idevento, idacademico: usuario.idusuario },
+          include: [
+            { association: 'academicoCreador' },
+            { association: 'comite' },
+            { association: 'Recursos' },
+            { association: 'clasificacion' },
+            { association: 'subcategoria' },
+            { association: 'Resultados' },
+            { association: 'Objetivos' },
+            { association: 'tiposDeEvento' },
+            { association: 'Layout' },
+            { association: 'creador' }
+          ]
+        });
+      } catch (e) {
+        // 2️⃣ Si algo falla, reintenta SIN asociaciones (el PDF saldrá con datos básicos)
+        console.warn('⚠️ Include falló, reintentando sin asociaciones:', e.message);
+        evento = await Evento.findOne({
+          where: { idevento: idevento, idacademico: usuario.idusuario }
+        });
+      }
 
       if (!evento) {
         await axios.post(`${TELEGRAM_API}/sendMessage`, {
@@ -622,69 +626,49 @@ const telegramWebhook = async (req, res) => {
         return res.status(200).send('OK');
       }
 
-            if (!evento) {
-        await axios.post(`${TELEGRAM_API}/sendMessage`, {
-          chat_id: chatId,
-          text: '❌ Evento no encontrado o no tienes permisos.'
-        });
-        return res.status(200).send('OK');
-      }
+      // 3️⃣ Normalizar nombres para el PDF (mayúsculas/minúsculas)
+      evento.dataValues.recursos = evento.dataValues.Recursos || evento.dataValues.recursos || [];
+      evento.dataValues.comite = evento.dataValues.comite || evento.dataValues.Comite || [];
 
-      
+      // 4️⃣ Datos extra opcionales (si fallan, simplemente no salen en el PDF)
       try {
-        // Actividades Previas
-        const [actPrevias] = await models.sequelize.query(`
-          SELECT * FROM actividad_previa WHERE idevento = ? ORDER BY fecha_inicio ASC
-        `, { replacements: [idevento], type: models.sequelize.QueryTypes.SELECT });
-        evento.dataValues.actividadesPrevias = actPrevias || [];
-      } catch (e) { evento.dataValues.actividadesPrevias = []; }
-
-      try {
-        // Actividades Durante
-        const [actDurante] = await models.sequelize.query(`
-          SELECT * FROM actividad_durante WHERE idevento = ? ORDER BY fecha_inicio ASC
-        `, { replacements: [idevento], type: models.sequelize.QueryTypes.SELECT });
-        evento.dataValues.actividadesDurante = actDurante || [];
-      } catch (e) { evento.dataValues.actividadesDurante = []; }
-
-      try {
-        // Actividades Post
-        const [actPost] = await models.sequelize.query(`
-          SELECT * FROM actividad_post WHERE idevento = ? ORDER BY fecha_inicio ASC
-        `, { replacements: [idevento], type: models.sequelize.QueryTypes.SELECT });
-        evento.dataValues.actividadesPost = actPost || [];
-      } catch (e) { evento.dataValues.actividadesPost = []; }
-
-      try {
-        // Servicios Contratados
-        const [servicios] = await models.sequelize.query(`
-          SELECT * FROM servicio_contratado WHERE idevento = ?
-        `, { replacements: [idevento], type: models.sequelize.QueryTypes.SELECT });
-        evento.dataValues.serviciosContratados = servicios || [];
-      } catch (e) { evento.dataValues.serviciosContratados = []; }
-
-      try {
-        // Presupuesto + Egresos + Ingresos
-        const [presupuesto] = await models.sequelize.query(`
-          SELECT * FROM presupuesto WHERE idevento = ? LIMIT 1
-        `, { replacements: [idevento], type: models.sequelize.QueryTypes.SELECT });
-        
-        if (presupuesto) {
-          const [egresos] = await models.sequelize.query(`
-            SELECT * FROM egreso WHERE idpresupuesto = ?
-          `, { replacements: [presupuesto.idpresupuesto || presupuesto.id], type: models.sequelize.QueryTypes.SELECT });
-          
-          const [ingresos] = await models.sequelize.query(`
-            SELECT * FROM ingreso WHERE idpresupuesto = ?
-          `, { replacements: [presupuesto.idpresupuesto || presupuesto.id], type: models.sequelize.QueryTypes.SELECT });
-          
-          presupuesto.egresos = egresos || [];
-          presupuesto.ingresos = ingresos || [];
-          evento.dataValues.presupuesto = presupuesto;
+        if (models.Fase && evento.idfase) {
+          const fase = await models.Fase.findOne({ where: { idfase: evento.idfase } });
+          evento.dataValues.faseActual = fase;
         }
-      } catch (e) { evento.dataValues.presupuesto = null; }
+      } catch (e) { /* sin fase */ }
 
-      // Mensaje de espera y envío del PDF (se queda igual)
+      try {
+        if (models.Actividad) {
+          const acts = await models.Actividad.findAll({ where: { idevento: idevento } });
+          const tipo = (a) => String(a.tipo || a.tipoactividad || a.fase || '').toLowerCase();
+          evento.dataValues.actividadesPrevias = acts.filter(a => tipo(a).includes('prev'));
+          evento.dataValues.actividadesDurante = acts.filter(a => tipo(a).includes('dur'));
+          evento.dataValues.actividadesPost = acts.filter(a => tipo(a).includes('post') || tipo(a).includes('desp'));
+          if (!evento.dataValues.actividadesPrevias.length && !evento.dataValues.actividadesDurante.length && !evento.dataValues.actividadesPost.length) {
+            evento.dataValues.actividadesPrevias = acts; // si no hay campo tipo, mostrar todas como previas
+          }
+        }
+      } catch (e) { /* sin actividades */ }
+
+      try {
+        if (models.Servicio) {
+          evento.dataValues.serviciosContratados = await models.Servicio.findAll({ where: { idevento: idevento } });
+        }
+      } catch (e) { /* sin servicios */ }
+
+      try {
+        if (models.Presupuesto) {
+          const pres = await models.Presupuesto.findOne({ where: { idevento: idevento } });
+          if (pres) {
+            if (models.Egreso) pres.dataValues.egresos = await models.Egreso.findAll({ where: { idpresupuesto: pres.idpresupuesto } });
+            if (models.Ingreso) pres.dataValues.ingresos = await models.Ingreso.findAll({ where: { idpresupuesto: pres.idpresupuesto } });
+            evento.dataValues.presupuesto = pres;
+          }
+        }
+      } catch (e) { /* sin presupuesto */ }
+
+      // 5️⃣ Generar y enviar el PDF
       await axios.post(`${TELEGRAM_API}/sendMessage`, {
         chat_id: chatId,
         text: `⏳ Generando PDF de: <b>${evento.nombreevento}</b>...`,
@@ -713,7 +697,6 @@ const telegramWebhook = async (req, res) => {
           maxContentLength: Infinity
         });
 
-        // Responder al callback para quitar el "loading" del botón
         await axios.post(`${TELEGRAM_API}/answerCallbackQuery`, {
           callback_query_id: callbackQueryId,
           text: '✅ PDF enviado'
@@ -729,10 +712,6 @@ const telegramWebhook = async (req, res) => {
 
       return res.status(200).send('OK');
     }
-
-    // ============================================
-    // 📧 VINCULACIÓN POR EMAIL
-    // ============================================
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const esEmail = emailRegex.test(text);
 
