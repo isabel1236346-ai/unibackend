@@ -600,7 +600,23 @@ const telegramWebhook = async (req, res) => {
           idevento: idevento,
           idacademico: usuario.idusuario 
         },
-        include: [{ all: true }]
+        include: [
+          { association: 'academicoCreador', include: [{ association: 'academico', include: ['facultad'] }] },
+          { association: 'comite' },
+          { association: 'Recursos' },
+          { association: 'Resultados' },
+          { association: 'Objetivos' },
+          { association: 'tiposDeEvento' },
+          { association: 'fases' },
+          { association: 'Layout' },
+          { association: 'clasificacion' },
+          { association: 'subcategoria' },
+          { association: 'actividadesPrevias' },
+          { association: 'actividadesDurante' },
+          { association: 'actividadesPost' },
+          { association: 'serviciosContratados' },
+          { association: 'presupuesto', include: ['egresos', 'ingresos'] }
+        ]
       });
 
       if (!evento) {
