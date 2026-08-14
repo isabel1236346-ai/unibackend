@@ -630,8 +630,7 @@ const telegramWebhook = async (req, res) => {
         return res.status(200).send('OK');
       }
 
-      // 🔄 TRAER DATOS ADICIONALES CON SQL DIRECTO (si existen las tablas)
-      const models = getModels();
+      
       try {
         // Actividades Previas
         const [actPrevias] = await models.sequelize.query(`
