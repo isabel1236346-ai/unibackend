@@ -289,40 +289,116 @@ const formatearEventoRechazado = (evento, index) => {
   return mensaje;
 };
 
-async function generarPDFEvento(evento) {
+async function generarPDFEvento(evento, usuario) {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ margin: 50 });
+    const doc = new PDFDocument({ margin: 50, size: 'A4' });
     const stream = new PassThrough();
     const buffers = [];
 
     doc.pipe(stream);
-
     stream.on('data', (chunk) => buffers.push(chunk));
     stream.on('end', () => resolve(Buffer.concat(buffers)));
 
-    // --- CONTENIDO DEL PDF ---
-    doc.fontSize(20).text('UNIFRANZ', { align: 'center' });
-    doc.fontSize(12).text('Sistema de Gestión de Eventos', { align: 'center' });
-    doc.moveDown(2);
+    // ENCABEZADO
+    doc.fontSize(24).fillColor('#E95A0C').text('UNIFRANZ', { align: 'center' });
+    doc.fontSize(11).fillColor('#333333').text('Ficha Técnica del Evento', { align: 'center' });
+    doc.moveDown(0.5);
+    doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke('#E95A0C');
+    doc.moveDown(1);
 
-    doc.fontSize(16).text('Ficha Técnica del Evento', { underline: true });
-    doc.moveDown();
+    // TÍTULO DEL EVENTO
+    doc.fontSize(18).fillColor('#1e293b').text(evento.nombreevento || 'Sin nombre', { align: 'center' });
+    doc.moveDown(1);
 
-    doc.fontSize(12);
-    doc.text(`Nombre: ${evento.nombreevento || 'N/A'}`);
-    doc.text(`Fecha: ${new Date(evento.fechaevento).toLocaleDateString('es-ES')}`);
+    // DATOS GENERALES
+    doc.fontSize(14).fillColor('#2980b9').text('Datos Generales', { underline: true });
+    doc.moveDown(0.5);
+    doc.fontSize(11).fillColor('#000000');
+    
+    const fechaEvento = evento.fechaevento ? 
+      new Date(evento.fechaevento).toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' }) : 'No definida';
+    
+    doc.text(`Fecha: ${fechaEvento}`);
     doc.text(`Hora: ${evento.horaevento || 'No definida'}`);
     doc.text(`Lugar: ${evento.lugarevento || 'No definido'}`);
-    doc.text(`Estado: ${evento.estado.toUpperCase()}`);
-    
+    doc.text(`Estado: ${evento.estado?.toUpperCase() || 'N/A'}`);
+    doc.text(`Responsable: ${evento.responsable_evento || 'No asignado'}`);
+    doc.moveDown(1);
+
+    // DESCRIPCIÓN
     if (evento.descripcion) {
-      doc.moveDown();
-      doc.text(`Descripción:`, { underline: true });
-      doc.text(evento.descripcion);
+      doc.fontSize(14).fillColor('#2980b9').text('Descripción', { underline: true });
+      doc.moveDown(0.5);
+      doc.fontSize(10).fillColor('#000000').text(evento.descripcion, { align: 'justify' });
+      doc.moveDown(1);
     }
 
-    doc.moveDown(2);
-    doc.fontSize(9).text(`Documento generado automáticamente - ${new Date().toLocaleString('es-ES')}`, { align: 'center' });
+    // ACTIVIDADES (Previas, Durante, Post)
+    const agregarActividades = (titulo, actividades) => {
+      if (!actividades || actividades.length === 0) return;
+      if (doc.y > 700) doc.addPage();
+      doc.fontSize(14).fillColor('#2980b9').text(titulo, { underline: true });
+      doc.moveDown(0.5);
+      doc.fontSize(10).fillColor('#000000');
+      actividades.forEach((act, i) => {
+        doc.text(`${i + 1}. ${act.nombre || act.nombreActividad || 'Actividad'}`);
+        doc.text(`   Responsable: ${act.responsable || 'N/A'}`, { indent: 20 });
+        doc.text(`   Fechas: ${act.fecha_inicio || act.fechaInicio || 'N/A'} al ${act.fecha_fin || act.fechaFin || 'N/A'}`, { indent: 20 });
+        doc.moveDown(0.3);
+      });
+      doc.moveDown(0.5);
+    };
+
+    agregarActividades('Actividades Previas', evento.actividadesPrevias);
+    agregarActividades('Actividades Durante el Evento', evento.actividadesDurante);
+    agregarActividades('Actividades Después del Evento', evento.actividadesPost);
+
+    // COMITÉ
+    if (evento.comite && evento.comite.length > 0) {
+      if (doc.y > 700) doc.addPage();
+      doc.fontSize(14).fillColor('#2980b9').text('Comité del Evento', { underline: true });
+      doc.moveDown(0.5);
+      doc.fontSize(10).fillColor('#000000');
+      evento.comite.forEach(miembro => {
+        const nombre = [miembro.nombre, miembro.apellidopat, miembro.apellidomat].filter(Boolean).join(' ');
+        doc.text(`• ${nombre} (${miembro.role}) - ${miembro.email}`);
+      });
+      doc.moveDown(1);
+    }
+
+    // RECURSOS
+    if (evento.recursos && evento.recursos.length > 0) {
+      if (doc.y > 700) doc.addPage();
+      doc.fontSize(14).fillColor('#2980b9').text('Recursos Solicitados', { underline: true });
+      doc.moveDown(0.5);
+      doc.fontSize(10).fillColor('#000000');
+      evento.recursos.forEach(r => {
+        doc.text(`• ${r.cantidad || 1} x ${r.nombre_recurso} (${r.recurso_tipo})`);
+      });
+      doc.moveDown(1);
+    }
+
+    // PRESUPUESTO
+    if (evento.presupuesto) {
+      if (doc.y > 650) doc.addPage();
+      doc.fontSize(14).fillColor('#2980b9').text('Presupuesto', { underline: true });
+      doc.moveDown(0.5);
+      doc.fontSize(10).fillColor('#000000');
+      doc.text(`Total Egresos: Bs ${(evento.presupuesto.total_egresos || 0).toFixed(2)}`);
+      doc.text(`Total Ingresos: Bs ${(evento.presupuesto.total_ingresos || 0).toFixed(2)}`);
+      const balanceColor = (evento.presupuesto.balance || 0) >= 0 ? '#27ae60' : '#e74c3c';
+      doc.fillColor(balanceColor).text(`Balance: Bs ${(evento.presupuesto.balance || 0).toFixed(2)}`, { bold: true });
+      doc.fillColor('#000000');
+    }
+
+    // PIE DE PÁGINA
+    const pageCount = doc.bufferedPageCount;
+    for (let i = 0; i < pageCount; i++) {
+      doc.switchToPage(i);
+      doc.fontSize(8).fillColor('#999999')
+        .text(`Documento generado el ${new Date().toLocaleString('es-ES')} - UNIFRANZ`, 
+          50, 750, { align: 'center', width: 500 });
+    }
 
     doc.end();
   });
@@ -1175,6 +1251,107 @@ Tu evento ha sido registrado y está siendo revisado por el administrador.`;
     console.error('❌ Response:', error.response?.data);
   }
 };
+const enviarNotificacionCompletaTelegram = async (req, res) => {
+  try {
+    const { idevento } = req.body;
+    if (!idevento) return res.status(400).json({ error: 'Falta idevento' });
+
+    const models = getModels();
+    const { Evento, User, Academico, Facultad } = models;
+
+    // 1. Obtener el evento con TODA la información (igual que tu app móvil)
+    const evento = await Evento.findByPk(idevento, {
+      include: [
+        {
+          model: User,
+          as: 'academicoCreador',
+          attributes: ['idusuario', 'nombre', 'apellidopat', 'apellidomat', 'email', 'telegram_chat_id', 'role'],
+          include: [{
+            model: Academico,
+            as: 'academico',
+            include: [{ model: Facultad, as: 'facultad', attributes: ['nombre_facultad'] }]
+          }]
+        }
+      ]
+    });
+
+    if (!evento) return res.status(404).json({ error: 'Evento no encontrado' });
+
+    const creador = evento.academicoCreador;
+    if (!creador || !creador.telegram_chat_id) {
+      return res.status(400).json({ error: 'El creador no tiene Telegram vinculado' });
+    }
+
+    const chatId = creador.telegram_chat_id;
+    const fechaEvento = new Date(evento.fechaevento).toLocaleDateString('es-ES', {
+      year: 'numeric', month: 'long', day: 'numeric'
+    });
+
+    // 2. Construir mensaje enriquecido con TODOS los datos
+    const facultad = creador.academico?.facultad?.nombre_facultad || 'Sin facultad';
+    
+    let mensaje = `🎉 <b>¡EVENTO APROBADO!</b>\n\n`;
+    mensaje += `📅 <b>${evento.nombreevento}</b>\n\n`;
+    mensaje += `━━━━━━━━━━━━━━━━━━━━\n`;
+    mensaje += `📋 <b>DATOS GENERALES</b>\n`;
+    mensaje += `🗓️ Fecha: ${fechaEvento}\n`;
+    mensaje += `🕐 Hora: ${evento.horaevento || 'No definida'}\n`;
+    mensaje += `📍 Lugar: ${evento.lugarevento || 'No definido'}\n`;
+    mensaje += `🏫 Facultad: ${facultad}\n`;
+    mensaje += `👤 Responsable: ${evento.responsable_evento || 'No asignado'}\n\n`;
+
+    // Descripción (si existe)
+    if (evento.descripcion) {
+      mensaje += `━━━━━━━━━━━━━━━━━━━━\n`;
+      mensaje += `📝 <b>DESCRIPCIÓN</b>\n`;
+      mensaje += `${evento.descripcion.substring(0, 200)}${evento.descripcion.length > 200 ? '...' : ''}\n\n`;
+    }
+
+    // Información de actividades (si tiene)
+    mensaje += `━━━━━━━━━━━━━━━━━━━━\n`;
+    mensaje += `📊 <b>ESTADÍSTICAS</b>\n`;
+    mensaje += `✅ Estado: <b>APROBADO</b>\n`;
+    mensaje += `📄 Se adjunta ficha técnica completa en PDF con:\n`;
+    mensaje += `   • Actividades detalladas\n`;
+    mensaje += `   • Presupuesto completo\n`;
+    mensaje += `   • Comité del evento\n`;
+    mensaje += `   • Recursos solicitados\n`;
+    mensaje += `   • Servicios contratados\n\n`;
+    mensaje += `¡Éxito en tu evento! 🎊`;
+
+    // 3. Enviar el mensaje de texto con toda la info
+    await axios.post(`${TELEGRAM_API}/sendMessage`, {
+      chat_id: chatId,
+      text: mensaje,
+      parse_mode: 'HTML'
+    });
+
+    // 4. Generar y enviar el PDF adjunto
+    try {
+      const pdfBuffer = await generarPDFEvento(evento, creador);
+      const form = new FormData();
+      form.append('chat_id', chatId);
+      form.append('document', pdfBuffer, {
+        filename: `Evento_${evento.nombreevento.replace(/\s+/g, '_').substring(0, 30)}.pdf`,
+        contentType: 'application/pdf'
+      });
+      form.append('caption', '📄 <b>Ficha Técnica Completa</b>\nDescarga el PDF con todos los detalles.');
+
+      await axios.post(`${TELEGRAM_API}/sendDocument`, form, {
+        headers: form.getHeaders(),
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity
+      });
+    } catch (pdfError) {
+      console.warn('⚠️ No se pudo adjuntar PDF:', pdfError.message);
+    }
+
+    res.json({ ok: true, message: 'Notificación completa enviada a Telegram' });
+  } catch (error) {
+    console.error('❌ Error enviando resumen a Telegram:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
 
 module.exports = {
   getMessages,
@@ -1184,4 +1361,5 @@ module.exports = {
   enviarNotificacionTelegram,
   appChat,
   getChatHistory,
+  enviarNotificacionCompletaTelegram
 };

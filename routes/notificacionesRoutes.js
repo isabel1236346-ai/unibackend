@@ -5,8 +5,9 @@ const {
   markAsRead,
   markAllAsRead,
   getUnreadCount,
-  diagnosticarNotificaciones
+  diagnosticarNotificaciones,
 } = require('../controllers/notificationController');
+const {enviarNotificacionCompletaTelegram} = require('../controllers/botController');
 
 const { protect } = require('../middleware/authMiddleware');
 
@@ -18,5 +19,7 @@ router.get('/', protect, getUserNotifications);
 router.patch('/:id/read', protect, markAsRead);
 router.patch('/mark-all-read', protect, markAllAsRead);
 router.get('/unread-count', protect, getUnreadCount);
+router.post('/enviar-resumen-telegram', protect, enviarNotificacionCompletaTelegram);
+
 
 module.exports = router;
