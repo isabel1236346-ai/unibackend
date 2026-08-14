@@ -432,11 +432,18 @@ const botStatus = (req, res) => {
   res.json({ status: 'online', platform: 'gemini', timestamp: new Date().toISOString() });
 };
 
-// ============================================
-// TELEGRAM WEBHOOK
-// ============================================
 
 const telegramWebhook = async (req, res) => {
+
+   const WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET;
+  if (WEBHOOK_SECRET) {
+    const telegramSecretHeader = req.headers['x-telegram-bot-api-secret-token'];
+    if (telegramSecretHeader !== WEBHOOK_SECRET) {
+      console.warn('⚠️ Acceso denegado: Petición al webhook sin el secreto correcto.');
+      return res.status(403).send('Forbidden');
+    }
+  }
+
   console.log('📩 [TELEGRAM] Webhook recibido');
   
   const { message } = req.body;
