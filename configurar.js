@@ -5,7 +5,7 @@ const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET;
 
 // ⚠️ LEE LAS INSTRUCCIONES DE ABAJO PARA SABER QUÉ PONER AQUÍ ⚠️
-const WEBHOOK_URL = 'https://TU-DOMINIO-DE-RAILWAY.up.railway.app/TU_RUTA'; 
+const WEBHOOK_URL = 'unibackend-production.up.railway.app/api/telegram/webhook'; // Cambia esto por la URL de tu servidor en internet
 
 async function configurar() {
   if (!TELEGRAM_TOKEN || !WEBHOOK_SECRET) {
