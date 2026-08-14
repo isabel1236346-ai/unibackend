@@ -535,10 +535,8 @@ const botStatus = (req, res) => {
   res.json({ status: 'online', platform: 'gemini', timestamp: new Date().toISOString() });
 };
 
-
 const telegramWebhook = async (req, res) => {
-
-   const WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET;
+  const WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET;
   if (WEBHOOK_SECRET) {
     const telegramSecretHeader = req.headers['x-telegram-bot-api-secret-token'];
     if (telegramSecretHeader !== WEBHOOK_SECRET) {
@@ -549,26 +547,121 @@ const telegramWebhook = async (req, res) => {
 
   console.log('📩 [TELEGRAM] Webhook recibido');
   
-    const { message, callback_query } = req.body;
+  const { message, callback_query } = req.body;
   
-  // Si es un click en botón inline, procesarlo como mensaje
-  if (callback_query && callback_query.data) {
-    req.body.message = {
-      chat: { id: callback_query.message.chat.id },
-      text: callback_query.data
-    };
+  // 🛡️ Variables seguras para todo el código
+  let chatId = null;
+  let text = '';
+  let isCallback = false;
+  let callbackQueryId = null;
+
+  // Caso 1: Mensaje normal de texto
+  if (message && message.chat && message.text) {
+    chatId = message.chat.id;
+    text = message.text.trim();
+  } 
+  // Caso 2: Click en botón inline (callback_query)
+  else if (callback_query && callback_query.message && callback_query.data) {
+    chatId = callback_query.message.chat.id;
+    text = callback_query.data;
+    isCallback = true;
+    callbackQueryId = callback_query.id;
+  } 
+  // Caso 3: Cualquier otra actualización de Telegram
+  else {
+    console.log('ℹ️ Update ignorado (no es mensaje ni botón)');
+    return res.sendStatus(200);
   }
-  
-  if (!req.body.message?.text && !callback_query) return res.sendStatus(200);
-  
-  const chatId = message.chat.id;
-  const text = message.text.trim();
 
   try {
+    // ============================================
+    // 🔄 SOLUCIÓN 2: PROCESAR BOTONES INLINE (va PRIMERO)
+    // ============================================
+    if (isCallback && text.startsWith('pdf_')) {
+      const idevento = text.replace('pdf_', '');
+      const models = getModels();
+      const { User, Evento, Academico, Facultad } = models;
+
+      const usuario = await User.findOne({ 
+        where: { telegram_chat_id: chatId.toString() } 
+      });
+
+      if (!usuario) {
+        await axios.post(`${TELEGRAM_API}/sendMessage`, {
+          chat_id: chatId,
+          text: '❌ Tu cuenta no está vinculada.'
+        });
+        return res.status(200).send('OK');
+      }
+
+      // Traer el evento con TODAS sus asociaciones
+      const evento = await Evento.findOne({
+        where: { 
+          idevento: idevento,
+          idacademico: usuario.idusuario 
+        },
+        include: [{ all: true }]
+      });
+
+      if (!evento) {
+        await axios.post(`${TELEGRAM_API}/sendMessage`, {
+          chat_id: chatId,
+          text: '❌ Evento no encontrado o no tienes permisos.'
+        });
+        return res.status(200).send('OK');
+      }
+
+      await axios.post(`${TELEGRAM_API}/sendMessage`, {
+        chat_id: chatId,
+        text: `⏳ Generando PDF de: <b>${evento.nombreevento}</b>...`,
+        parse_mode: 'HTML'
+      });
+
+      try {
+        const usuarioConFacultad = await User.findOne({
+          where: { idusuario: usuario.idusuario },
+          include: [{ model: Academico, as: 'academico', include: [{ model: Facultad, as: 'facultad' }] }]
+        });
+
+        const pdfBuffer = await generarPDFEvento(evento, usuarioConFacultad);
+
+        const form = new FormData();
+        form.append('chat_id', chatId);
+        form.append('document', pdfBuffer, {
+          filename: `Ficha_${evento.nombreevento.replace(/\s+/g, '_').substring(0, 30)}.pdf`,
+          contentType: 'application/pdf'
+        });
+        form.append('caption', `📄 <b>Ficha Técnica:</b> ${evento.nombreevento}`);
+
+        await axios.post(`${TELEGRAM_API}/sendDocument`, form, {
+          headers: form.getHeaders(),
+          maxBodyLength: Infinity,
+          maxContentLength: Infinity
+        });
+
+        // Responder al callback para quitar el "loading" del botón
+        await axios.post(`${TELEGRAM_API}/answerCallbackQuery`, {
+          callback_query_id: callbackQueryId,
+          text: '✅ PDF enviado'
+        });
+
+      } catch (error) {
+        console.error('❌ Error generando/enviando PDF:', error.message);
+        await axios.post(`${TELEGRAM_API}/sendMessage`, {
+          chat_id: chatId,
+          text: '⚠️ Ocurrió un error al generar el documento PDF.'
+        });
+      }
+
+      return res.status(200).send('OK');
+    }
+
+    // ============================================
+    // 📧 VINCULACIÓN POR EMAIL
+    // ============================================
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const esEmail = emailRegex.test(text);
 
-    // 📧 VINCULACIÓN POR EMAIL
     if (esEmail) {
       const models = getModels();
       const { User } = models;
@@ -621,7 +714,9 @@ Hola <b>${usuario.nombre} ${usuario.apellidopat || ''}</b>, ahora recibirás not
       return res.status(200).send('OK');
     }
 
+    // ============================================
     // 📋 COMANDOS
+    // ============================================
     if (text === '/start') {
       const welcomeMessage = 
 `🤖 <b>¡Bienvenido al Bot de Eventos UNIFRANZ!</b>
@@ -636,6 +731,7 @@ Ejemplo: <code>juan.perez@unifranz.edu.bo</code>
 • /rechazados - Eventos rechazados (con motivos)
 • /comite - Eventos donde eres comité
 • /resumen - Resumen completo con estadísticas
+• /ficha_pdf - Descargar ficha en PDF
 • /estado - Verificar vinculación
 • /desvincular - Desvincular cuenta de Telegram
 • /ayuda - Mostrar ayuda`;
@@ -702,25 +798,25 @@ Ejemplo: <code>juan.perez@unifranz.edu.bo</code>
         return res.status(200).send('OK');
       }
 
-      let message = `✅ <b>Eventos Aprobados (${total})</b>\n\n`;
+      let mensajeEventos = `✅ <b>Eventos Aprobados (${total})</b>\n\n`;
       
       if (activos.length > 0) {
-        message += `<b>📅 Próximos eventos (${activos.length}):</b>\n\n`;
+        mensajeEventos += `<b>📅 Próximos eventos (${activos.length}):</b>\n\n`;
         activos.slice(0, 5).forEach((evento, index) => {
-          message += formatearEventoAprobado(evento, index) + '\n\n';
+          mensajeEventos += formatearEventoAprobado(evento, index) + '\n\n';
         });
       }
       
       if (vencidos.length > 0) {
-        message += `\n<b>📜 Eventos pasados (${vencidos.length}):</b>\n\n`;
+        mensajeEventos += `\n<b>📜 Eventos pasados (${vencidos.length}):</b>\n\n`;
         vencidos.slice(0, 3).forEach((evento, index) => {
-          message += formatearEventoAprobado(evento, index) + '\n\n';
+          mensajeEventos += formatearEventoAprobado(evento, index) + '\n\n';
         });
       }
 
       await axios.post(`${TELEGRAM_API}/sendMessage`, {
         chat_id: chatId,
-        text: message,
+        text: mensajeEventos,
         parse_mode: 'HTML'
       });
 
@@ -756,14 +852,14 @@ Ejemplo: <code>juan.perez@unifranz.edu.bo</code>
         return res.status(200).send('OK');
       }
 
-      let message = `⏳ <b>Eventos Pendientes (${eventosPendientes.length})</b>\n\n`;
+      let mensajeEventos = `⏳ <b>Eventos Pendientes (${eventosPendientes.length})</b>\n\n`;
       eventosPendientes.slice(0, 5).forEach((evento, index) => {
-        message += formatearEventoPendiente(evento, index) + '\n\n';
+        mensajeEventos += formatearEventoPendiente(evento, index) + '\n\n';
       });
 
       await axios.post(`${TELEGRAM_API}/sendMessage`, {
         chat_id: chatId,
-        text: message,
+        text: mensajeEventos,
         parse_mode: 'HTML'
       });
 
@@ -799,14 +895,14 @@ Ejemplo: <code>juan.perez@unifranz.edu.bo</code>
         return res.status(200).send('OK');
       }
 
-      let message = `❌ <b>Eventos Rechazados (${eventosRechazados.length})</b>\n\n`;
+      let mensajeEventos = `❌ <b>Eventos Rechazados (${eventosRechazados.length})</b>\n\n`;
       eventosRechazados.slice(0, 5).forEach((evento, index) => {
-        message += formatearEventoRechazado(evento, index) + '\n\n';
+        mensajeEventos += formatearEventoRechazado(evento, index) + '\n\n';
       });
 
       await axios.post(`${TELEGRAM_API}/sendMessage`, {
         chat_id: chatId,
-        text: message,
+        text: mensajeEventos,
         parse_mode: 'HTML'
       });
 
@@ -815,7 +911,7 @@ Ejemplo: <code>juan.perez@unifranz.edu.bo</code>
 
     if (text === '/comite') {
       const models = getModels();
-      const { User, Evento } = models;
+      const { User } = models;
 
       const usuario = await User.findOne({ 
         where: { telegram_chat_id: chatId.toString() } 
@@ -851,7 +947,7 @@ Ejemplo: <code>juan.perez@unifranz.edu.bo</code>
         return res.status(200).send('OK');
       }
 
-      let message = `👥 <b>Eventos donde eres Comité (${comites.length})</b>\n\n`;
+      let mensajeEventos = `👥 <b>Eventos donde eres Comité (${comites.length})</b>\n\n`;
       comites.slice(0, 5).forEach((evento, index) => {
         const fecha = new Date(evento.fechaevento).toLocaleDateString('es-ES');
         const estadoEmoji = {
@@ -861,15 +957,15 @@ Ejemplo: <code>juan.perez@unifranz.edu.bo</code>
           'cancelado': '🚫'
         }[evento.estado] || '📝';
         
-        message += `<b>${index + 1}. ${evento.nombreevento}</b>\n`;
-        message += `   🗓️ Fecha: ${fecha}\n`;
-        message += `   📍 Lugar: ${evento.lugarevento || 'No definido'}\n`;
-        message += `   ${estadoEmoji} Estado: ${evento.estado}\n\n`;
+        mensajeEventos += `<b>${index + 1}. ${evento.nombreevento}</b>\n`;
+        mensajeEventos += `   🗓️ Fecha: ${fecha}\n`;
+        mensajeEventos += `   📍 Lugar: ${evento.lugarevento || 'No definido'}\n`;
+        mensajeEventos += `   ${estadoEmoji} Estado: ${evento.estado}\n\n`;
       });
 
       await axios.post(`${TELEGRAM_API}/sendMessage`, {
         chat_id: chatId,
-        text: message,
+        text: mensajeEventos,
         parse_mode: 'HTML'
       });
 
@@ -908,7 +1004,7 @@ Ejemplo: <code>juan.perez@unifranz.edu.bo</code>
       );
       const totalComites = comites[0]?.total || 0;
 
-      const message = 
+      const mensajeResumen = 
 `📊 <b>Resumen de tu actividad</b>
 
 👤 <b>${usuario.nombre} ${usuario.apellidopat || ''}</b>
@@ -929,7 +1025,7 @@ Usa /mis_eventos, /pendientes, /rechazados o /comite para ver detalles.`;
 
       await axios.post(`${TELEGRAM_API}/sendMessage`, {
         chat_id: chatId,
-        text: message,
+        text: mensajeResumen,
         parse_mode: 'HTML'
       });
 
@@ -940,22 +1036,22 @@ Usa /mis_eventos, /pendientes, /rechazados o /comite para ver detalles.`;
       const helpMessage = 
 `📚 <b>Comandos disponibles:</b>
 
-      <b>Vinculación:</b>
-      • /start - Bienvenida
-      • /estado - Verificar vinculación
-      • /desvincular - Desvincular cuenta de Telegram
-      • Enviar email - Vincular cuenta
+<b>Vinculación:</b>
+• /start - Bienvenida
+• /estado - Verificar vinculación
+• /desvincular - Desvincular cuenta de Telegram
+• Enviar email - Vincular cuenta
 
-      <b>Eventos:</b>
-      • /mis_eventos - Eventos aprobados (detallado)
-      • /pendientes - Eventos pendientes (detallado)
-      • /rechazados - Eventos rechazados (con motivos)
-      • /comite - Eventos donde eres comité
-      • /resumen - Resumen completo con estadísticas
-      • /ficha_pdf - Descargar ficha en PDF
+<b>Eventos:</b>
+• /mis_eventos - Eventos aprobados (detallado)
+• /pendientes - Eventos pendientes (detallado)
+• /rechazados - Eventos rechazados (con motivos)
+• /comite - Eventos donde eres comité
+• /resumen - Resumen completo con estadísticas
+• /ficha_pdf - Descargar ficha en PDF
 
-      <b>Otros:</b>
-      • /ayuda - Mostrar esta ayuda`;
+<b>Otros:</b>
+• /ayuda - Mostrar esta ayuda`;
 
       await axios.post(`${TELEGRAM_API}/sendMessage`, {
         chat_id: chatId,
@@ -965,61 +1061,9 @@ Usa /mis_eventos, /pendientes, /rechazados o /comite para ver detalles.`;
 
       return res.status(200).send('OK');
     }
-    if (text === '/desvincular') {
-      const models = getModels();
-      const { User } = models;
 
-      console.log(`🔓 [TELEGRAM] Comando /desvincular recibido de chat_id: ${chatId}`);
-
-      const usuario = await User.findOne({ 
-        where: { telegram_chat_id: chatId.toString() } 
-      });
-
-      if (!usuario) {
-        console.log(`⚠️ No se encontró usuario vinculado con chat_id: ${chatId}`);
-        await axios.post(`${TELEGRAM_API}/sendMessage`, {
-          chat_id: chatId,
-          text: '❌ Tu cuenta de Telegram no está vinculada a ningún usuario.\n\nEnvía tu email institucional para vincularla.',
-        });
-        return res.status(200).send('OK');
-      }
-
-      console.log(`🔓 Desvinculando usuario: ${usuario.email} (ID: ${usuario.idusuario})`);
-
-      // Desvincular Telegram
-      await User.update(
-        { 
-          telegram_chat_id: null, 
-          telegram_username: null 
-        },
-        { 
-          where: { idusuario: usuario.idusuario } 
-        }
-      );
-
-      console.log(`✅ Usuario ${usuario.email} desvinculado correctamente de Telegram`);
-
-      const successMessage = 
-`✅ <b>¡Cuenta desvinculada correctamente!</b>
-
-Tu cuenta de Telegram ya no está vinculada a:
-👤 <b>${usuario.nombre} ${usuario.apellidopat || ''}</b>
-📧 ${usuario.email}
-
-❌ Ya no recibirás notificaciones automáticas.
-
-Si quieres volver a vincular tu cuenta, envía tu email institucional.`;
-
-      await axios.post(`${TELEGRAM_API}/sendMessage`, {
-        chat_id: chatId,
-        text: successMessage,
-        parse_mode: 'HTML'
-      });
-
-      return res.status(200).send('OK');
-    }
-
-       if (text === '/ficha_pdf') {
+    // 📄 SELECCIONAR EVENTO PARA PDF (con botones)
+    if (text === '/ficha_pdf') {
       const models = getModels();
       const { User, Evento } = models;
 
@@ -1075,91 +1119,58 @@ Si quieres volver a vincular tu cuenta, envía tu email institucional.`;
       return res.status(200).send('OK');
     }
 
-    // 🔄 PROCESAR SELECCIÓN DE BOTÓN (cuando tocan un evento)
-    if (req.body.callback_query) {
-      const callbackData = req.body.callback_query.data;
-      const callbackChatId = req.body.callback_query.message.chat.id;
-      
-      if (callbackData.startsWith('pdf_')) {
-        const idevento = callbackData.replace('pdf_', '');
-        const models = getModels();
-        const { User, Evento, Academico, Facultad } = models;
+    if (text === '/desvincular') {
+      const models = getModels();
+      const { User } = models;
 
-        const usuario = await User.findOne({ 
-          where: { telegram_chat_id: callbackChatId.toString() } 
-        });
+      console.log(`🔓 [TELEGRAM] Comando /desvincular recibido de chat_id: ${chatId}`);
 
-        if (!usuario) {
-          await axios.post(`${TELEGRAM_API}/sendMessage`, {
-            chat_id: callbackChatId,
-            text: '❌ Tu cuenta no está vinculada.'
-          });
-          return res.status(200).send('OK');
-        }
+      const usuario = await User.findOne({ 
+        where: { telegram_chat_id: chatId.toString() } 
+      });
 
-        // Traer el evento con TODAS sus asociaciones
-        const evento = await Evento.findOne({
-          where: { 
-            idevento: idevento,
-            idacademico: usuario.idusuario 
-          },
-          include: [{ all: true }] // 👈 Trae actividades, comité, presupuesto, etc.
-        });
-
-        if (!evento) {
-          await axios.post(`${TELEGRAM_API}/sendMessage`, {
-            chat_id: callbackChatId,
-            text: '❌ Evento no encontrado o no tienes permisos.'
-          });
-          return res.status(200).send('OK');
-        }
-
+      if (!usuario) {
+        console.log(`⚠️ No se encontró usuario vinculado con chat_id: ${chatId}`);
         await axios.post(`${TELEGRAM_API}/sendMessage`, {
-          chat_id: callbackChatId,
-          text: `⏳ Generando PDF de: <b>${evento.nombreevento}</b>...`,
-          parse_mode: 'HTML'
+          chat_id: chatId,
+          text: '❌ Tu cuenta de Telegram no está vinculada a ningún usuario.\n\nEnvía tu email institucional para vincularla.',
         });
-
-        try {
-          // Traer también la facultad del usuario para el PDF
-          const usuarioConFacultad = await User.findOne({
-            where: { idusuario: usuario.idusuario },
-            include: [{ model: Academico, as: 'academico', include: [{ model: Facultad, as: 'facultad' }] }]
-          });
-
-          const pdfBuffer = await generarPDFEvento(evento, usuarioConFacultad);
-
-          const form = new FormData();
-          form.append('chat_id', callbackChatId);
-          form.append('document', pdfBuffer, {
-            filename: `Ficha_${evento.nombreevento.replace(/\s+/g, '_').substring(0, 30)}.pdf`,
-            contentType: 'application/pdf'
-          });
-          form.append('caption', `📄 <b>Ficha Técnica:</b> ${evento.nombreevento}`);
-
-          await axios.post(`${TELEGRAM_API}/sendDocument`, form, {
-            headers: form.getHeaders(),
-            maxBodyLength: Infinity,
-            maxContentLength: Infinity
-          });
-
-          // Responder al callback para que Telegram sepa que fue procesado
-          await axios.post(`${TELEGRAM_API}/answerCallbackQuery`, {
-            callback_query_id: req.body.callback_query.id,
-            text: '✅ PDF generado'
-          });
-
-        } catch (error) {
-          console.error('❌ Error generando/enviando PDF:', error.message);
-          await axios.post(`${TELEGRAM_API}/sendMessage`, {
-            chat_id: callbackChatId,
-            text: '⚠️ Ocurrió un error al generar el documento PDF.'
-          });
-        }
-
         return res.status(200).send('OK');
       }
-    } 
+
+      console.log(`🔓 Desvinculando usuario: ${usuario.email} (ID: ${usuario.idusuario})`);
+
+      await User.update(
+        { 
+          telegram_chat_id: null, 
+          telegram_username: null 
+        },
+        { 
+          where: { idusuario: usuario.idusuario } 
+        }
+      );
+
+      console.log(`✅ Usuario ${usuario.email} desvinculado correctamente de Telegram`);
+
+      const successMessage = 
+`✅ <b>¡Cuenta desvinculada correctamente!</b>
+
+Tu cuenta de Telegram ya no está vinculada a:
+👤 <b>${usuario.nombre} ${usuario.apellidopat || ''}</b>
+📧 ${usuario.email}
+
+❌ Ya no recibirás notificaciones automáticas.
+
+Si quieres volver a vincular tu cuenta, envía tu email institucional.`;
+
+      await axios.post(`${TELEGRAM_API}/sendMessage`, {
+        chat_id: chatId,
+        text: successMessage,
+        parse_mode: 'HTML'
+      });
+
+      return res.status(200).send('OK');
+    }
 
     // Comando no reconocido
     await axios.post(`${TELEGRAM_API}/sendMessage`, {
@@ -1171,10 +1182,12 @@ Si quieres volver a vincular tu cuenta, envía tu email institucional.`;
     console.error('❌ [TELEGRAM] Error:', error.message);
     console.error('❌ Response data:', error.response?.data);
     
-    await axios.post(`${TELEGRAM_API}/sendMessage`, {
-      chat_id: chatId,
-      text: `❌ Ocurrió un error. Intenta nuevamente.`,
-    }).catch(e => console.error('Error enviando mensaje de error:', e.message));
+    if (chatId) {
+      await axios.post(`${TELEGRAM_API}/sendMessage`, {
+        chat_id: chatId,
+        text: `❌ Ocurrió un error. Intenta nuevamente.`,
+      }).catch(e => console.error('Error enviando mensaje de error:', e.message));
+    }
   }
   
   res.status(200).send('OK');
