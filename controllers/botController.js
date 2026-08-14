@@ -867,6 +867,7 @@ Usa /mis_eventos, /pendientes, /rechazados o /comite para ver detalles.`;
       • /rechazados - Eventos rechazados (con motivos)
       • /comite - Eventos donde eres comité
       • /resumen - Resumen completo con estadísticas
+      • /ficha_pdf - Descargar ficha en PDF
 
       <b>Otros:</b>
       • /ayuda - Mostrar esta ayuda`;
