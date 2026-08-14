@@ -2,13 +2,12 @@ const axios = require('axios');
 const { getModels } = require('../models/index.js');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { Op } = require('sequelize');
+const PDFDocument = require('pdfkit');
+const { PassThrough } = require('stream');
+const FormData = require('form-data');
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const TELEGRAM_API = `https://api.telegram.org/bot${process.env.TELEGRAM_TOKEN}`;
-
-// ============================================
-// FUNCIONES AUXILIARES PARA OBTENER EVENTOS
-// ============================================
 
 const getEventosAprobadosForBot = async (usuarioId, userRole) => {
   const models = getModels();
@@ -233,9 +232,6 @@ const getEventosRechazadosForBot = async (usuarioId, userRole) => {
   }
 };
 
-// ============================================
-// FUNCIONES DE FORMATO PARA TELEGRAM
-// ============================================
 
 const formatearEventoAprobado = (evento, index) => {
   const fecha = new Date(evento.fechaevento).toLocaleDateString('es-ES');
@@ -293,10 +289,44 @@ const formatearEventoRechazado = (evento, index) => {
   return mensaje;
 };
 
-// ============================================
-// GEMINI AI
-// ============================================
+async function generarPDFEvento(evento) {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ margin: 50 });
+    const stream = new PassThrough();
+    const buffers = [];
 
+    doc.pipe(stream);
+
+    stream.on('data', (chunk) => buffers.push(chunk));
+    stream.on('end', () => resolve(Buffer.concat(buffers)));
+
+    // --- CONTENIDO DEL PDF ---
+    doc.fontSize(20).text('UNIFRANZ', { align: 'center' });
+    doc.fontSize(12).text('Sistema de Gestión de Eventos', { align: 'center' });
+    doc.moveDown(2);
+
+    doc.fontSize(16).text('Ficha Técnica del Evento', { underline: true });
+    doc.moveDown();
+
+    doc.fontSize(12);
+    doc.text(`Nombre: ${evento.nombreevento || 'N/A'}`);
+    doc.text(`Fecha: ${new Date(evento.fechaevento).toLocaleDateString('es-ES')}`);
+    doc.text(`Hora: ${evento.horaevento || 'No definida'}`);
+    doc.text(`Lugar: ${evento.lugarevento || 'No definido'}`);
+    doc.text(`Estado: ${evento.estado.toUpperCase()}`);
+    
+    if (evento.descripcion) {
+      doc.moveDown();
+      doc.text(`Descripción:`, { underline: true });
+      doc.text(evento.descripcion);
+    }
+
+    doc.moveDown(2);
+    doc.fontSize(9).text(`Documento generado automáticamente - ${new Date().toLocaleString('es-ES')}`, { align: 'center' });
+
+    doc.end();
+  });
+}
 async function askGemini(userMessage, senderInfo = 'Invitado', eventosContexto = "", history = []) {
   const SYSTEM_PROMPT = `Eres el asistente virtual de gestión de eventos de la UNIFRANZ.
 📌 REGLAS:
@@ -358,9 +388,6 @@ function getMessage() {
   try { return getModels()?.Message || null; } catch { return null; }
 }
 
-// ============================================
-// CHAT APP
-// ============================================
 
 const appChat = async (req, res) => {
   try {
@@ -906,6 +933,73 @@ Si quieres volver a vincular tu cuenta, envía tu email institucional.`;
       return res.status(200).send('OK');
     }
 
+        if (text === '/ficha_pdf') {
+      const models = getModels();
+      const { User, Evento } = models;
+
+      const usuario = await User.findOne({ 
+        where: { telegram_chat_id: chatId.toString() } 
+      });
+
+      if (!usuario) {
+        await axios.post(`${TELEGRAM_API}/sendMessage`, {
+          chat_id: chatId,
+          text: '❌ Tu cuenta no está vinculada.\n\nEnvía tu email institucional para vincularla.',
+        });
+        return res.status(200).send('OK');
+      }
+
+      // Buscamos el último evento del usuario para generar su ficha
+      const ultimoEvento = await Evento.findOne({
+        where: { idacademico: usuario.idusuario },
+        order: [['created_at', 'DESC']]
+      });
+
+      if (!ultimoEvento) {
+        await axios.post(`${TELEGRAM_API}/sendMessage`, {
+          chat_id: chatId,
+          text: '📭 No tienes eventos registrados para generar una ficha.'
+        });
+        return res.status(200).send('OK');
+      }
+
+      // Mensaje de "espera" mientras se genera el PDF
+      await axios.post(`${TELEGRAM_API}/sendMessage`, {
+        chat_id: chatId,
+        text: '⏳ Generando ficha técnica en PDF, por favor espera...'
+      });
+
+      try {
+        // 1. Generamos el PDF en memoria usando tu función
+        const pdfBuffer = await generarPDFEvento(ultimoEvento);
+
+        // 2. Creamos el formulario para enviar el archivo
+        const form = new FormData();
+        form.append('chat_id', chatId);
+        form.append('document', pdfBuffer, {
+          filename: `Ficha_${ultimoEvento.nombreevento.replace(/\s+/g, '_').substring(0, 20)}.pdf`,
+          contentType: 'application/pdf'
+        });
+        form.append('caption', `📄 <b>Ficha Técnica:</b> ${ultimoEvento.nombreevento}`, { parse_mode: 'HTML' });
+
+        // 3. Enviamos el documento a Telegram
+        await axios.post(`${TELEGRAM_API}/sendDocument`, form, {
+          headers: form.getHeaders(),
+          maxBodyLength: Infinity,
+          maxContentLength: Infinity
+        });
+
+      } catch (error) {
+        console.error('❌ Error generando/enviando PDF:', error.message);
+        await axios.post(`${TELEGRAM_API}/sendMessage`, {
+          chat_id: chatId,
+          text: '⚠️ Ocurrió un error al generar el documento PDF.'
+        });
+      }
+
+      return res.status(200).send('OK');
+    }
+
     // Comando no reconocido
     await axios.post(`${TELEGRAM_API}/sendMessage`, {
       chat_id: chatId,
@@ -956,9 +1050,6 @@ const getChatHistory = async (req, res) => {
   }
 };
 
-// ============================================
-// NOTIFICACIONES TELEGRAM (ACTUALIZADO)
-// ============================================
 
 const enviarNotificacionTelegram = async (evento, tipo) => {
   try {
