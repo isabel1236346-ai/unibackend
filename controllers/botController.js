@@ -594,7 +594,6 @@ const telegramWebhook = async (req, res) => {
         return res.status(200).send('OK');
       }
 
-      // Traer el evento con TODAS sus asociaciones
       const evento = await Evento.findOne({
         where: { 
           idevento: idevento,
@@ -611,11 +610,7 @@ const telegramWebhook = async (req, res) => {
           { association: 'Layout' },
           { association: 'clasificacion' },
           { association: 'subcategoria' },
-          { association: 'actividadesPrevias' },
-          { association: 'actividadesDurante' },
-          { association: 'actividadesPost' },
-          { association: 'serviciosContratados' },
-          { association: 'presupuesto', include: ['egresos', 'ingresos'] }
+          { association: 'creador' }
         ]
       });
 
@@ -627,6 +622,70 @@ const telegramWebhook = async (req, res) => {
         return res.status(200).send('OK');
       }
 
+            if (!evento) {
+        await axios.post(`${TELEGRAM_API}/sendMessage`, {
+          chat_id: chatId,
+          text: '❌ Evento no encontrado o no tienes permisos.'
+        });
+        return res.status(200).send('OK');
+      }
+
+      // 🔄 TRAER DATOS ADICIONALES CON SQL DIRECTO (si existen las tablas)
+      const models = getModels();
+      try {
+        // Actividades Previas
+        const [actPrevias] = await models.sequelize.query(`
+          SELECT * FROM actividad_previa WHERE idevento = ? ORDER BY fecha_inicio ASC
+        `, { replacements: [idevento], type: models.sequelize.QueryTypes.SELECT });
+        evento.dataValues.actividadesPrevias = actPrevias || [];
+      } catch (e) { evento.dataValues.actividadesPrevias = []; }
+
+      try {
+        // Actividades Durante
+        const [actDurante] = await models.sequelize.query(`
+          SELECT * FROM actividad_durante WHERE idevento = ? ORDER BY fecha_inicio ASC
+        `, { replacements: [idevento], type: models.sequelize.QueryTypes.SELECT });
+        evento.dataValues.actividadesDurante = actDurante || [];
+      } catch (e) { evento.dataValues.actividadesDurante = []; }
+
+      try {
+        // Actividades Post
+        const [actPost] = await models.sequelize.query(`
+          SELECT * FROM actividad_post WHERE idevento = ? ORDER BY fecha_inicio ASC
+        `, { replacements: [idevento], type: models.sequelize.QueryTypes.SELECT });
+        evento.dataValues.actividadesPost = actPost || [];
+      } catch (e) { evento.dataValues.actividadesPost = []; }
+
+      try {
+        // Servicios Contratados
+        const [servicios] = await models.sequelize.query(`
+          SELECT * FROM servicio_contratado WHERE idevento = ?
+        `, { replacements: [idevento], type: models.sequelize.QueryTypes.SELECT });
+        evento.dataValues.serviciosContratados = servicios || [];
+      } catch (e) { evento.dataValues.serviciosContratados = []; }
+
+      try {
+        // Presupuesto + Egresos + Ingresos
+        const [presupuesto] = await models.sequelize.query(`
+          SELECT * FROM presupuesto WHERE idevento = ? LIMIT 1
+        `, { replacements: [idevento], type: models.sequelize.QueryTypes.SELECT });
+        
+        if (presupuesto) {
+          const [egresos] = await models.sequelize.query(`
+            SELECT * FROM egreso WHERE idpresupuesto = ?
+          `, { replacements: [presupuesto.idpresupuesto || presupuesto.id], type: models.sequelize.QueryTypes.SELECT });
+          
+          const [ingresos] = await models.sequelize.query(`
+            SELECT * FROM ingreso WHERE idpresupuesto = ?
+          `, { replacements: [presupuesto.idpresupuesto || presupuesto.id], type: models.sequelize.QueryTypes.SELECT });
+          
+          presupuesto.egresos = egresos || [];
+          presupuesto.ingresos = ingresos || [];
+          evento.dataValues.presupuesto = presupuesto;
+        }
+      } catch (e) { evento.dataValues.presupuesto = null; }
+
+      // Mensaje de espera y envío del PDF (se queda igual)
       await axios.post(`${TELEGRAM_API}/sendMessage`, {
         chat_id: chatId,
         text: `⏳ Generando PDF de: <b>${evento.nombreevento}</b>...`,
