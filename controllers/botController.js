@@ -549,8 +549,17 @@ const telegramWebhook = async (req, res) => {
 
   console.log('📩 [TELEGRAM] Webhook recibido');
   
-  const { message } = req.body;
-  if (!message?.text) return res.sendStatus(200);
+    const { message, callback_query } = req.body;
+  
+  // Si es un click en botón inline, procesarlo como mensaje
+  if (callback_query && callback_query.data) {
+    req.body.message = {
+      chat: { id: callback_query.message.chat.id },
+      text: callback_query.data
+    };
+  }
+  
+  if (!req.body.message?.text && !callback_query) return res.sendStatus(200);
   
   const chatId = message.chat.id;
   const text = message.text.trim();
@@ -1010,7 +1019,7 @@ Si quieres volver a vincular tu cuenta, envía tu email institucional.`;
       return res.status(200).send('OK');
     }
 
-        if (text === '/ficha_pdf') {
+       if (text === '/ficha_pdf') {
       const models = getModels();
       const { User, Evento } = models;
 
@@ -1026,13 +1035,14 @@ Si quieres volver a vincular tu cuenta, envía tu email institucional.`;
         return res.status(200).send('OK');
       }
 
-      // Buscamos el último evento del usuario para generar su ficha
-      const ultimoEvento = await Evento.findOne({
+      // Buscamos los últimos 5 eventos del usuario
+      const eventosRecientes = await Evento.findAll({
         where: { idacademico: usuario.idusuario },
-        order: [['created_at', 'DESC']]
+        order: [['created_at', 'DESC']],
+        limit: 5
       });
 
-      if (!ultimoEvento) {
+      if (eventosRecientes.length === 0) {
         await axios.post(`${TELEGRAM_API}/sendMessage`, {
           chat_id: chatId,
           text: '📭 No tienes eventos registrados para generar una ficha.'
@@ -1040,42 +1050,116 @@ Si quieres volver a vincular tu cuenta, envía tu email institucional.`;
         return res.status(200).send('OK');
       }
 
-      // Mensaje de "espera" mientras se genera el PDF
-      await axios.post(`${TELEGRAM_API}/sendMessage`, {
-        chat_id: chatId,
-        text: '⏳ Generando ficha técnica en PDF, por favor espera...'
+      // Creamos los botones de selección
+      const botones = eventosRecientes.map((evento) => {
+        const fecha = new Date(evento.fechaevento).toLocaleDateString('es-ES');
+        const nombreCorto = evento.nombreevento.length > 25 ? 
+          evento.nombreevento.substring(0, 25) + '...' : 
+          evento.nombreevento;
+        
+        return [{
+          text: `${nombreCorto} (${fecha})`,
+          callback_data: `pdf_${evento.idevento}`
+        }];
       });
 
-      try {
-        // 1. Generamos el PDF en memoria usando tu función
-        const pdfBuffer = await generarPDFEvento(ultimoEvento);
-
-        // 2. Creamos el formulario para enviar el archivo
-        const form = new FormData();
-        form.append('chat_id', chatId);
-        form.append('document', pdfBuffer, {
-          filename: `Ficha_${ultimoEvento.nombreevento.replace(/\s+/g, '_').substring(0, 20)}.pdf`,
-          contentType: 'application/pdf'
-        });
-        form.append('caption', `📄 <b>Ficha Técnica:</b> ${ultimoEvento.nombreevento}`, { parse_mode: 'HTML' });
-
-        // 3. Enviamos el documento a Telegram
-        await axios.post(`${TELEGRAM_API}/sendDocument`, form, {
-          headers: form.getHeaders(),
-          maxBodyLength: Infinity,
-          maxContentLength: Infinity
-        });
-
-      } catch (error) {
-        console.error('❌ Error generando/enviando PDF:', error.message);
-        await axios.post(`${TELEGRAM_API}/sendMessage`, {
-          chat_id: chatId,
-          text: '⚠️ Ocurrió un error al generar el documento PDF.'
-        });
-      }
+      await axios.post(`${TELEGRAM_API}/sendMessage`, {
+        chat_id: chatId,
+        text: '📄 <b>Selecciona el evento para descargar en PDF:</b>',
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: botones
+        }
+      });
 
       return res.status(200).send('OK');
     }
+
+    // 🔄 PROCESAR SELECCIÓN DE BOTÓN (cuando tocan un evento)
+    if (req.body.callback_query) {
+      const callbackData = req.body.callback_query.data;
+      const callbackChatId = req.body.callback_query.message.chat.id;
+      
+      if (callbackData.startsWith('pdf_')) {
+        const idevento = callbackData.replace('pdf_', '');
+        const models = getModels();
+        const { User, Evento, Academico, Facultad } = models;
+
+        const usuario = await User.findOne({ 
+          where: { telegram_chat_id: callbackChatId.toString() } 
+        });
+
+        if (!usuario) {
+          await axios.post(`${TELEGRAM_API}/sendMessage`, {
+            chat_id: callbackChatId,
+            text: '❌ Tu cuenta no está vinculada.'
+          });
+          return res.status(200).send('OK');
+        }
+
+        // Traer el evento con TODAS sus asociaciones
+        const evento = await Evento.findOne({
+          where: { 
+            idevento: idevento,
+            idacademico: usuario.idusuario 
+          },
+          include: [{ all: true }] // 👈 Trae actividades, comité, presupuesto, etc.
+        });
+
+        if (!evento) {
+          await axios.post(`${TELEGRAM_API}/sendMessage`, {
+            chat_id: callbackChatId,
+            text: '❌ Evento no encontrado o no tienes permisos.'
+          });
+          return res.status(200).send('OK');
+        }
+
+        await axios.post(`${TELEGRAM_API}/sendMessage`, {
+          chat_id: callbackChatId,
+          text: `⏳ Generando PDF de: <b>${evento.nombreevento}</b>...`,
+          parse_mode: 'HTML'
+        });
+
+        try {
+          // Traer también la facultad del usuario para el PDF
+          const usuarioConFacultad = await User.findOne({
+            where: { idusuario: usuario.idusuario },
+            include: [{ model: Academico, as: 'academico', include: [{ model: Facultad, as: 'facultad' }] }]
+          });
+
+          const pdfBuffer = await generarPDFEvento(evento, usuarioConFacultad);
+
+          const form = new FormData();
+          form.append('chat_id', callbackChatId);
+          form.append('document', pdfBuffer, {
+            filename: `Ficha_${evento.nombreevento.replace(/\s+/g, '_').substring(0, 30)}.pdf`,
+            contentType: 'application/pdf'
+          });
+          form.append('caption', `📄 <b>Ficha Técnica:</b> ${evento.nombreevento}`);
+
+          await axios.post(`${TELEGRAM_API}/sendDocument`, form, {
+            headers: form.getHeaders(),
+            maxBodyLength: Infinity,
+            maxContentLength: Infinity
+          });
+
+          // Responder al callback para que Telegram sepa que fue procesado
+          await axios.post(`${TELEGRAM_API}/answerCallbackQuery`, {
+            callback_query_id: req.body.callback_query.id,
+            text: '✅ PDF generado'
+          });
+
+        } catch (error) {
+          console.error('❌ Error generando/enviando PDF:', error.message);
+          await axios.post(`${TELEGRAM_API}/sendMessage`, {
+            chat_id: callbackChatId,
+            text: '⚠️ Ocurrió un error al generar el documento PDF.'
+          });
+        }
+
+        return res.status(200).send('OK');
+      }
+    } 
 
     // Comando no reconocido
     await axios.post(`${TELEGRAM_API}/sendMessage`, {
