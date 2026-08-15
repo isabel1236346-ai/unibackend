@@ -919,7 +919,9 @@ const aprobarEvento = async (req, res) => {
     }
 
     await evento.update({ 
-      estado: 'aprobado', fecha_aprobacion: new Date()});
+      estado: 'aprobado', fecha_aprobacion: new Date()
+    });
+     await enviarNotificacionTelegram({ idevento }, 'aprobado');
 
        if (evento.idacademico) {
       try {
@@ -961,17 +963,16 @@ const rechazarEvento = async (req, res) => {
     const models = getModels();
     const { Evento, Academico, User } = models;
 
-    // ✅ CONSULTA CORREGIDA: Anidamos User dentro de Academico
     const evento = await Evento.findByPk(id, {
       include: [
         { 
           model: Academico, 
           as: 'creador',
-          attributes: ['idacademico'], // Solo pedimos el ID de la tabla academico
+          attributes: ['idacademico'], 
           include: [
             {
               model: User, 
-              as: 'usuario', // Alias definido en tu modelo: Academico.belongsTo(models.User, { as: 'usuario' })
+              as: 'usuario', 
               attributes: ['nombre', 'apellidopat', 'apellidomat', 'email', 'role']
             }
           ]
@@ -996,7 +997,7 @@ const rechazarEvento = async (req, res) => {
       razon_rechazo: razonRechazo
     });
 
-    // ✅ NOTIFICACIÓN AL USUARIO
+    await enviarNotificacionTelegram({ idevento }, 'rechazado');
     if (evento.idacademico) {
       try {
         const mensaje = `Tu evento "${evento.nombreevento}" fue rechazado. Motivo: ${razonRechazo}`;

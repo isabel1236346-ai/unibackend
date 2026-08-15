@@ -8,8 +8,9 @@ const { Server } = require('socket.io');
 const server = http.createServer(app);
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const PORT = process.env.PORT || 3001;
+const {iniciarRecordatorios} = require('./services/recordatorios.js');
+const { iniciarCronJobs } = require('./utils/cronJobs.js');
 
-// 🔍 DEBUG
 console.log('🔍 [DEBUG] DB_USER:', process.env.DB_USER ? '***' : 'undefined');
 console.log('🔍 [DEBUG] DB_HOST:', process.env.DB_HOST);
 console.log('🔍 [DEBUG] DB_NAME:', process.env.DB_NAME);
@@ -134,6 +135,9 @@ const startServer = async () => {
     server.listen(PORT, () => {
       console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
     });
+    await iniciarCronJobs(); 
+    iniciarRecordatorios();
+    console.log('🤖 Servicios de notificaciones iniciados');
 
   } catch (err) {
     console.error('❌ Error crítico al iniciar:', err);
@@ -142,7 +146,7 @@ const startServer = async () => {
     }
     process.exit(1);
   }
-  require('./services/recordatorios');
+  iniciarRecordatorios();
   console.log('🤖 Servicios de notificaciones iniciados');
 };
 
