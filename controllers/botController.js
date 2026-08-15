@@ -756,13 +756,92 @@ const telegramWebhook = async (req, res) => {
       evento.dataValues.recursos = evento.dataValues.Recursos || evento.dataValues.recursos || [];
       evento.dataValues.comite = evento.dataValues.comite || evento.dataValues.Comite || [];
 
-      // 4️⃣ Datos extra opcionales (si fallan, simplemente no salen en el PDF)
+           // 4️⃣ DATOS EXTRA - SQL DIRECTO (respeta nombres camelCase de PostgreSQL)
+      
+      // Clasificación Estratégica (nombre real: "nombreClasificacion" con comillas)
       try {
-        if (models.Fase && evento.idfase) {
-          const fase = await models.Fase.findOne({ where: { idfase: evento.idfase } });
-          evento.dataValues.faseActual = fase;
+        if (evento.idclasificacion) {
+          const [clasif] = await models.sequelize.query(
+            `SELECT idclasificacion, "nombreClasificacion" FROM clasificacion_estrategica WHERE idclasificacion = ?`,
+            { replacements: [evento.idclasificacion], type: models.sequelize.QueryTypes.SELECT }
+          );
+          evento.dataValues.clasificacion = clasif || null;
         }
-      } catch (e) { /* sin fase */ }
+      } catch (e) { evento.dataValues.clasificacion = null; }
+
+      // Subcategoría (nombre real: "nombreSubcategoria")
+      try {
+        if (evento.idsubcategoria) {
+          const [subcat] = await models.sequelize.query(
+            `SELECT idsubcategoria, "nombreSubcategoria" FROM subcategoria WHERE idsubcategoria = ?`,
+            { replacements: [evento.idsubcategoria], type: models.sequelize.QueryTypes.SELECT }
+          );
+          evento.dataValues.subcategoria = subcat || null;
+        }
+      } catch (e) { evento.dataValues.subcategoria = null; }
+
+      // Tipos de Evento
+      try {
+        const tipos = await models.sequelize.query(
+          `SELECT t.idtipoevento, t.nombretipo 
+           FROM evento_tipos et 
+           JOIN tipos_de_evento t ON et.idtipoevento = t.idtipoevento 
+           WHERE et.idevento = ?`,
+          { replacements: [idevento], type: models.sequelize.QueryTypes.SELECT }
+        );
+        evento.dataValues.tiposDeEvento = tipos || [];
+      } catch (e) { evento.dataValues.tiposDeEvento = []; }
+
+      // Resultados Esperados
+      try {
+        const [resultados] = await models.sequelize.query(
+          `SELECT * FROM resultado WHERE idevento = ? LIMIT 1`,
+          { replacements: [idevento], type: models.sequelize.QueryTypes.SELECT }
+        );
+        evento.dataValues.Resultados = resultados ? [resultados] : [];
+      } catch (e) { evento.dataValues.Resultados = []; }
+
+      // Actividades
+      try {
+        if (models.Actividad) {
+          const acts = await models.Actividad.findAll({ where: { idevento: idevento } });
+          const tipo = (a) => String(a.tipo || a.tipoactividad || a.fase || '').toLowerCase();
+          evento.dataValues.actividadesPrevias = acts.filter(a => tipo(a).includes('prev'));
+          evento.dataValues.actividadesDurante = acts.filter(a => tipo(a).includes('dur'));
+          evento.dataValues.actividadesPost = acts.filter(a => tipo(a).includes('post') || tipo(a).includes('desp'));
+          if (!evento.dataValues.actividadesPrevias.length && !evento.dataValues.actividadesDurante.length && !evento.dataValues.actividadesPost.length) {
+            evento.dataValues.actividadesPrevias = acts;
+          }
+        }
+      } catch (e) { evento.dataValues.actividadesPrevias = []; }
+
+      // Servicios Contratados
+      try {
+        if (models.Servicio) {
+          evento.dataValues.serviciosContratados = await models.Servicio.findAll({ where: { idevento: idevento } });
+        }
+      } catch (e) { evento.dataValues.serviciosContratados = []; }
+
+      // Layout
+      try {
+        if (evento.idlayout && models.Layout) {
+          const layout = await models.Layout.findByPk(evento.idlayout);
+          evento.dataValues.Layout = layout;
+        }
+      } catch (e) { evento.dataValues.Layout = null; }
+
+      // Presupuesto + Egresos + Ingresos
+      try {
+        if (models.Presupuesto) {
+          const pres = await models.Presupuesto.findOne({ where: { idevento: idevento } });
+          if (pres) {
+            const idPres = pres.idpresupuesto || pres.id;
+            if (models.Egreso) pres.dataValues.egresos = await models.Egreso.findAll({ where: { idpresupuesto: idPres } });
+            if (models.Ingreso) pres.dataValues.ingresos = await models.Ingreso.findAll({ where: { idpresupuesto: idPres } });
+            evento.dataValues.presupuesto = pres;
+          }
+        }
+      } catch (e) { evento.dataValues.presupuesto = null; }
 
       try {
         if (models.Actividad) {
