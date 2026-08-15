@@ -361,7 +361,7 @@ async function generarPDFEvento(evento, usuario) {
       tituloSeccion('Clasificación Estratégica');
       const txt = [
         clasif?.nombreClasificacion || clasif?.nombreClasificacion || '',
-        subcat?.nombreSubcategoria || subcat?.nombre_subcategoria || clasif?.nombresubcategoria || ''
+        subcat?.nombresubcategoria || subcat?.nombreSubcategoria || subcat?.nombre_subcategoria || ''
       ].filter(Boolean).join(' - ');
       doc.text(`• ${txt || 'Sin clasificación'}`);
       doc.moveDown(0.8);
@@ -718,7 +718,7 @@ const telegramWebhook = async (req, res) => {
         return res.status(200).send('OK');
       }
 
-      // 1️ Intento con asociaciones comprobadas que SÍ funcionan
+      // 1️⃣ Traer evento SIN clasificacion ni subcategoria (esas fallan en Sequelize)
       let evento = null;
       try {
         evento = await Evento.findOne({
@@ -727,8 +727,6 @@ const telegramWebhook = async (req, res) => {
             { association: 'academicoCreador' },
             { association: 'comite' },
             { association: 'Recursos' },
-            { association: 'clasificacion' },
-            { association: 'subcategoria' },
             { association: 'Resultados' },
             { association: 'Objetivos' },
             { association: 'tiposDeEvento' },
@@ -737,7 +735,6 @@ const telegramWebhook = async (req, res) => {
           ]
         });
       } catch (e) {
-        // 2️⃣ Si algo falla, reintenta SIN asociaciones (el PDF saldrá con datos básicos)
         console.warn('⚠️ Include falló, reintentando sin asociaciones:', e.message);
         evento = await Evento.findOne({
           where: { idevento: idevento, idacademico: usuario.idusuario }
@@ -752,13 +749,11 @@ const telegramWebhook = async (req, res) => {
         return res.status(200).send('OK');
       }
 
-      // 3️⃣ Normalizar nombres para el PDF (mayúsculas/minúsculas)
+      // 2️⃣ Normalizar nombres
       evento.dataValues.recursos = evento.dataValues.Recursos || evento.dataValues.recursos || [];
       evento.dataValues.comite = evento.dataValues.comite || evento.dataValues.Comite || [];
 
-           // 4️⃣ DATOS EXTRA - SQL DIRECTO (respeta nombres camelCase de PostgreSQL)
-      
-      // Clasificación Estratégica (nombre real: "nombreClasificacion" con comillas)
+      // 3️⃣ CLASIFICACIÓN ESTRATÉGICA (SQL directo - columna real: "nombreClasificacion")
       try {
         if (evento.idclasificacion) {
           const [clasif] = await models.sequelize.query(
@@ -769,18 +764,18 @@ const telegramWebhook = async (req, res) => {
         }
       } catch (e) { evento.dataValues.clasificacion = null; }
 
-      // Subcategoría (nombre real: "nombreSubcategoria")
+      // 4️⃣ SUBCATEGORÍA (SQL directo - columna real: nombresubcategoria TODO EN MINÚSCULAS)
       try {
         if (evento.idsubcategoria) {
           const [subcat] = await models.sequelize.query(
-            `SELECT idsubcategoria, "nombreSubcategoria" FROM subcategoria WHERE idsubcategoria = ?`,
+            `SELECT idsubcategoria, nombresubcategoria FROM subcategoria WHERE idsubcategoria = ?`,
             { replacements: [evento.idsubcategoria], type: models.sequelize.QueryTypes.SELECT }
           );
           evento.dataValues.subcategoria = subcat || null;
         }
       } catch (e) { evento.dataValues.subcategoria = null; }
 
-      // Tipos de Evento
+      // 5️⃣ Tipos de Evento
       try {
         const tipos = await models.sequelize.query(
           `SELECT t.idtipoevento, t.nombretipo 
@@ -792,7 +787,7 @@ const telegramWebhook = async (req, res) => {
         evento.dataValues.tiposDeEvento = tipos || [];
       } catch (e) { evento.dataValues.tiposDeEvento = []; }
 
-      // Resultados Esperados
+      // 6️⃣ Resultados Esperados
       try {
         const [resultados] = await models.sequelize.query(
           `SELECT * FROM resultado WHERE idevento = ? LIMIT 1`,
@@ -801,7 +796,7 @@ const telegramWebhook = async (req, res) => {
         evento.dataValues.Resultados = resultados ? [resultados] : [];
       } catch (e) { evento.dataValues.Resultados = []; }
 
-      // Actividades
+      // 7️⃣ Actividades (3 fases)
       try {
         if (models.Actividad) {
           const acts = await models.Actividad.findAll({ where: { idevento: idevento } });
@@ -815,14 +810,14 @@ const telegramWebhook = async (req, res) => {
         }
       } catch (e) { evento.dataValues.actividadesPrevias = []; }
 
-      // Servicios Contratados
+      // 8️⃣ Servicios Contratados
       try {
         if (models.Servicio) {
           evento.dataValues.serviciosContratados = await models.Servicio.findAll({ where: { idevento: idevento } });
         }
       } catch (e) { evento.dataValues.serviciosContratados = []; }
 
-      // Layout
+      // 9️⃣ Layout
       try {
         if (evento.idlayout && models.Layout) {
           const layout = await models.Layout.findByPk(evento.idlayout);
@@ -830,7 +825,7 @@ const telegramWebhook = async (req, res) => {
         }
       } catch (e) { evento.dataValues.Layout = null; }
 
-      // Presupuesto + Egresos + Ingresos
+      // 🔟 Presupuesto + Egresos + Ingresos
       try {
         if (models.Presupuesto) {
           const pres = await models.Presupuesto.findOne({ where: { idevento: idevento } });
@@ -843,37 +838,7 @@ const telegramWebhook = async (req, res) => {
         }
       } catch (e) { evento.dataValues.presupuesto = null; }
 
-      try {
-        if (models.Actividad) {
-          const acts = await models.Actividad.findAll({ where: { idevento: idevento } });
-          const tipo = (a) => String(a.tipo || a.tipoactividad || a.fase || '').toLowerCase();
-          evento.dataValues.actividadesPrevias = acts.filter(a => tipo(a).includes('prev'));
-          evento.dataValues.actividadesDurante = acts.filter(a => tipo(a).includes('dur'));
-          evento.dataValues.actividadesPost = acts.filter(a => tipo(a).includes('post') || tipo(a).includes('desp'));
-          if (!evento.dataValues.actividadesPrevias.length && !evento.dataValues.actividadesDurante.length && !evento.dataValues.actividadesPost.length) {
-            evento.dataValues.actividadesPrevias = acts; // si no hay campo tipo, mostrar todas como previas
-          }
-        }
-      } catch (e) { /* sin actividades */ }
-
-      try {
-        if (models.Servicio) {
-          evento.dataValues.serviciosContratados = await models.Servicio.findAll({ where: { idevento: idevento } });
-        }
-      } catch (e) { /* sin servicios */ }
-
-      try {
-        if (models.Presupuesto) {
-          const pres = await models.Presupuesto.findOne({ where: { idevento: idevento } });
-          if (pres) {
-            if (models.Egreso) pres.dataValues.egresos = await models.Egreso.findAll({ where: { idpresupuesto: pres.idpresupuesto } });
-            if (models.Ingreso) pres.dataValues.ingresos = await models.Ingreso.findAll({ where: { idpresupuesto: pres.idpresupuesto } });
-            evento.dataValues.presupuesto = pres;
-          }
-        }
-      } catch (e) { /* sin presupuesto */ }
-
-      // 5️⃣ Generar y enviar el PDF
+      // 📤 Generar y enviar el PDF
       await axios.post(`${TELEGRAM_API}/sendMessage`, {
         chat_id: chatId,
         text: `⏳ Generando PDF de: <b>${evento.nombreevento}</b>...`,
