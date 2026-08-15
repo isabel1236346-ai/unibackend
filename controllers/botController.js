@@ -290,140 +290,239 @@ const formatearEventoRechazado = (evento, index) => {
 };
 
 async function generarPDFEvento(evento, usuario) {
+  // 🖼️ Pre-descargar imagen del layout (si existe) para incrustarla en el PDF
+  let layoutImageBuffer = null;
+  const layoutData = evento.Layout || evento.layout || null;
+  if (layoutData && layoutData.url_imagen) {
+    try {
+      const base = process.env.API_BASE_URL || 'https://unibackend-production.up.railway.app';
+      const resp = await axios.get(`${base}/uploads/${layoutData.url_imagen}`, { responseType: 'arraybuffer', timeout: 8000 });
+      layoutImageBuffer = Buffer.from(resp.data);
+    } catch (e) { layoutImageBuffer = null; }
+  }
+
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ margin: 50, size: 'A4' });
     const stream = new PassThrough();
     const buffers = [];
-
     doc.pipe(stream);
-    stream.on('data', (chunk) => buffers.push(chunk));
+    stream.on('data', (c) => buffers.push(c));
     stream.on('end', () => resolve(Buffer.concat(buffers)));
+    stream.on('error', reject);
 
-    // ENCABEZADO INSTITUCIONAL
+    // ===== HELPERS =====
+    const asegurarPagina = (alto) => { if (doc.y > 780 - alto) doc.addPage(); };
+    const fechaCorta = (f) => f ? new Date(f).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' }) : 'No especificada';
+    const tituloSeccion = (t) => {
+      asegurarPagina(90);
+      doc.font('Helvetica-Bold').fontSize(13).fillColor('#2980b9').text(t, { underline: true });
+      doc.moveDown(0.4);
+      doc.font('Helvetica').fontSize(10).fillColor('#000000');
+    };
+    const negrita = (t, opts) => { doc.font('Helvetica-Bold').text(t, opts); doc.font('Helvetica'); };
+
+    // Normalizar datos (mayúsculas/minúsculas de aliases)
+    const recursos = evento.Recursos || evento.recursos || [];
+    const comite = evento.comite || evento.Comite || [];
+    const tipos = evento.tiposDeEvento || evento.TiposDeEvento || [];
+    const clasif = evento.clasificacion || evento.Clasificacion || null;
+    const subcat = evento.subcategoria || null;
+    const resultados = Array.isArray(evento.Resultados) ? evento.Resultados[0] : (evento.Resultados || evento.resultados || null);
+    const servicios = evento.serviciosContratados || evento.ServiciosContratados || [];
+    const presupuesto = evento.presupuesto || evento.Presupuesto || null;
+    const egresos = presupuesto?.egresos || evento.Egresos || evento.egresos || [];
+    const ingresos = presupuesto?.ingresos || evento.Ingresos || evento.ingresos || [];
+
+    // ===== ENCABEZADO =====
     doc.fontSize(24).fillColor('#E95A0C').text('UNIFRANZ', { align: 'center' });
     doc.fontSize(11).fillColor('#333333').text('Ficha Técnica del Evento', { align: 'center' });
     doc.moveDown(0.5);
-    doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke('#E95A0C');
+    doc.strokeColor('#E95A0C').moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+    doc.moveDown(1);
+    doc.fontSize(16).fillColor('#1e293b').text((evento.nombreevento || 'Sin nombre').toUpperCase(), { align: 'center' });
     doc.moveDown(1);
 
-    // ✨ TÍTULO DEL EVENTO EN MAYÚSCULAS
-    const tituloEvento = (evento.nombreevento || 'Sin nombre').toUpperCase();
-    doc.fontSize(18).fillColor('#1e293b').text(tituloEvento, { align: 'center' });
-    doc.moveDown(1);
-
-    // DATOS GENERALES
-    doc.fontSize(14).fillColor('#2980b9').text('Datos Generales', { underline: true });
-    doc.moveDown(0.5);
-    doc.fontSize(11).fillColor('#000000');
-    
-    const fechaEvento = evento.fechaevento ? 
-      new Date(evento.fechaevento).toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' }) : 'No definida';
-    
-    doc.text(`Fecha: ${fechaEvento}`);
-    
-    // ✨ HORA LIMPIA (sin segundos)
-    const horaLimpia = evento.horaevento ? evento.horaevento.toString().substring(0, 5) : 'No definida';
-    doc.text(`Hora: ${horaLimpia}`);
-    
-    doc.text(`Lugar: ${evento.lugarevento || 'No definido'}`);
-    doc.text(`Estado: ${evento.estado?.toUpperCase() || 'N/A'}`);
+    // ===== 1. DATOS GENERALES =====
+    tituloSeccion('Datos Generales');
+    doc.text(`Fecha: ${evento.fechaevento ? new Date(evento.fechaevento).toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' }) : 'No definida'}`);
+    doc.text(`Hora: ${(evento.horaevento || 'No definida').toString().substring(0, 5)}`);
+    doc.text(`Ubicación: ${evento.lugarevento || 'No definido'}`);
+    doc.text(`Estado: ${(evento.estado || 'N/A').toUpperCase()}`);
     doc.text(`Responsable: ${evento.responsable_evento || 'No asignado'}`);
-    
-    // ✨ ORGANIZADOR Y FACULTAD
     if (usuario) {
-      const organizador = [usuario.nombre, usuario.apellidopat, usuario.apellidomat].filter(Boolean).join(' ').trim();
-      if (organizador) doc.text(`Organizador: ${organizador}`);
-      if (usuario.academico?.facultad?.nombre_facultad) {
-        doc.text(`Facultad: ${usuario.academico.facultad.nombre_facultad}`);
-      }
+      const org = [usuario.nombre, usuario.apellidopat, usuario.apellidomat].filter(Boolean).join(' ').trim();
+      if (org) doc.text(`Organizador: ${org}`);
+      if (usuario.academico?.facultad?.nombre_facultad) doc.text(`Facultad: ${usuario.academico.facultad.nombre_facultad}`);
     }
-    doc.moveDown(1);
+    doc.moveDown(0.8);
 
-    // DESCRIPCIÓN
-    if (evento.descripcion) {
-      doc.fontSize(14).fillColor('#2980b9').text('Descripción', { underline: true });
-      doc.moveDown(0.5);
-      doc.fontSize(10).fillColor('#000000').text(evento.descripcion, { align: 'justify' });
-      doc.moveDown(1);
+    // ===== 2. CLASIFICACIÓN ESTRATÉGICA =====
+    if (clasif || subcat) {
+      tituloSeccion('Clasificación Estratégica');
+      const txt = [
+        clasif?.nombreClasificacion || clasif?.nombre_clasificacion || '',
+        subcat?.nombreSubcategoria || subcat?.nombre_subcategoria || clasif?.nombresubcategoria || ''
+      ].filter(Boolean).join(' - ');
+      doc.text(`• ${txt || 'Sin clasificación'}`);
+      doc.moveDown(0.8);
     }
 
-    // ACTIVIDADES (Previas, Durante, Post)
-    const agregarActividades = (titulo, actividades) => {
-      if (!actividades || actividades.length === 0) return;
-      if (doc.y > 700) doc.addPage();
-      doc.fontSize(14).fillColor('#2980b9').text(titulo, { underline: true });
-      doc.moveDown(0.5);
-      doc.fontSize(10).fillColor('#000000');
-      actividades.forEach((act, i) => {
-        doc.text(`${i + 1}. ${act.nombre || act.nombreActividad || 'Actividad'}`);
-        doc.text(`   Responsable: ${act.responsable || 'N/A'}`, { indent: 20 });
-        doc.text(`   Fechas: ${act.fecha_inicio || act.fechaInicio || 'N/A'} al ${act.fecha_fin || act.fechaFin || 'N/A'}`, { indent: 20 });
+    // ===== 3. TIPOS DE EVENTO =====
+    if (tipos.length) {
+      tituloSeccion('Tipos de Evento');
+      tipos.forEach(t => doc.text(`• ${t.nombretipo || 'Tipo'}`));
+      doc.moveDown(0.8);
+    }
+
+    // ===== 4. RESULTADOS ESPERADOS =====
+    if (resultados && (resultados.participacion_esperada || resultados.satisfaccion_esperada || resultados.otros_resultados)) {
+      tituloSeccion('Resultados Esperados');
+      if (resultados.participacion_esperada) doc.text(`Participación: ${resultados.participacion_esperada}`);
+      if (resultados.satisfaccion_esperada) doc.text(`Satisfacción: ${resultados.satisfaccion_esperada}`);
+      if (resultados.otros_resultados) doc.text(`Otros: ${resultados.otros_resultados}`);
+      doc.moveDown(0.8);
+    }
+
+    // ===== 5. RECURSOS SOLICITADOS (por categoría) =====
+    if (recursos.length) {
+      tituloSeccion('Recursos Solicitados');
+      [['tecnologico', 'Tecnológicos'], ['mobiliario', 'Mobiliario'], ['vajilla', 'Vajilla']].forEach(([key, label]) => {
+        const items = recursos.filter(r => (r.recurso_tipo || '').toLowerCase() === key);
+        if (!items.length) return;
+        doc.fillColor('#E95A0C'); negrita(label); doc.fillColor('#000000');
+        items.forEach(r => doc.text(`• ${r.cantidad || 1} x ${r.nombre_recurso}`));
         doc.moveDown(0.3);
+      });
+      const otros = recursos.filter(r => !['tecnologico', 'mobiliario', 'vajilla'].includes((r.recurso_tipo || '').toLowerCase()));
+      if (otros.length) {
+        doc.fillColor('#E95A0C'); negrita('Otros'); doc.fillColor('#000000');
+        otros.forEach(r => doc.text(`• ${r.cantidad || 1} x ${r.nombre_recurso} (${r.recurso_tipo})`));
+      }
+      doc.moveDown(0.8);
+    }
+
+    // ===== 6. COMITÉ DEL EVENTO =====
+    if (comite.length) {
+      tituloSeccion('Comité del Evento');
+      comite.forEach(m => {
+        asegurarPagina(40);
+        const nombre = [m.nombre, m.apellidopat, m.apellidomat].filter(Boolean).join(' ');
+        negrita(nombre || 'Miembro');
+        doc.text(`Rol: ${m.role === 'academico' ? 'Académico' : (m.role || 'N/A')}`);
+        doc.text(`Email: ${m.email || 'N/A'}`);
+        doc.moveDown(0.4);
+      });
+      doc.moveDown(0.5);
+    }
+
+    // ===== 7. ACTIVIDADES (3 fases) =====
+    const secActividades = (titulo, lista) => {
+      if (!lista || !lista.length) return;
+      tituloSeccion(titulo);
+      lista.forEach((a, i) => {
+        asegurarPagina(60);
+        negrita(`${i + 1}. ${a.nombre || a.nombreActividad || 'Actividad'}`);
+        doc.text(`   Responsable: ${a.responsable || 'No especificado'}`);
+        doc.text(`   Inicio: ${fechaCorta(a.fecha_inicio || a.fechaInicio)} — Fin: ${fechaCorta(a.fecha_fin || a.fechaFin)}`);
+        doc.moveDown(0.4);
       });
       doc.moveDown(0.5);
     };
+    secActividades('Actividades Previas', evento.actividadesPrevias);
+    secActividades('Actividades Durante el Evento', evento.actividadesDurante);
+    secActividades('Actividades Después del Evento', evento.actividadesPost);
 
-    agregarActividades('Actividades Previas', evento.actividadesPrevias);
-    agregarActividades('Actividades Durante el Evento', evento.actividadesDurante);
-    agregarActividades('Actividades Después del Evento', evento.actividadesPost);
-
-    // COMITÉ
-    if (evento.comite && evento.comite.length > 0) {
-      if (doc.y > 700) doc.addPage();
-      doc.fontSize(14).fillColor('#2980b9').text('Comité del Evento', { underline: true });
-      doc.moveDown(0.5);
-      doc.fontSize(10).fillColor('#000000');
-      evento.comite.forEach(miembro => {
-        const nombre = [miembro.nombre, miembro.apellidopat, miembro.apellidomat].filter(Boolean).join(' ');
-        doc.text(`• ${nombre} (${miembro.role}) - ${miembro.email}`);
+    // ===== 8. SERVICIOS CONTRATADOS =====
+    if (servicios.length) {
+      tituloSeccion('Servicios Contratados');
+      servicios.forEach((s, i) => {
+        asegurarPagina(60);
+        negrita(`${i + 1}. ${s.nombreServicio || s.nombre || 'Servicio'}`);
+        if (s.caracteristica) doc.text(`   Características: ${s.caracteristica}`);
+        doc.text(`   Fecha Entrega: ${fechaCorta(s.fechaInicio || s.fecha_inicio)}`);
+        if (s.observaciones) doc.text(`   Obs: ${s.observaciones}`);
+        doc.moveDown(0.4);
       });
-      doc.moveDown(1);
+      doc.moveDown(0.5);
     }
 
-    // RECURSOS
-    if (evento.recursos && evento.recursos.length > 0) {
-      if (doc.y > 700) doc.addPage();
-      doc.fontSize(14).fillColor('#2980b9').text('Recursos Solicitados', { underline: true });
-      doc.moveDown(0.5);
-      doc.fontSize(10).fillColor('#000000');
-      evento.recursos.forEach(r => {
-        doc.text(`• ${r.cantidad || 1} x ${r.nombre_recurso} (${r.recurso_tipo})`);
-      });
-      doc.moveDown(1);
+    // ===== 9. LAYOUT DEL EVENTO (con imagen) =====
+    if (layoutData) {
+      tituloSeccion('Layout del Evento');
+      if (layoutData.nombre) doc.text(`Nombre: ${layoutData.nombre}`);
+      if (layoutImageBuffer) {
+        try {
+          asegurarPagina(250);
+          doc.image(layoutImageBuffer, 100, doc.y, { width: 400 });
+          doc.moveDown(1);
+        } catch (e) { /* sin imagen */ }
+      }
+      doc.moveDown(0.8);
     }
 
-    // PRESUPUESTO
-    if (evento.presupuesto) {
-      if (doc.y > 650) doc.addPage();
-      doc.fontSize(14).fillColor('#2980b9').text('Presupuesto', { underline: true });
-      doc.moveDown(0.5);
-      doc.fontSize(10).fillColor('#000000');
-      doc.text(`Total Egresos: Bs ${(evento.presupuesto.total_egresos || 0).toFixed(2)}`);
-      doc.text(`Total Ingresos: Bs ${(evento.presupuesto.total_ingresos || 0).toFixed(2)}`);
-      const balanceColor = (evento.presupuesto.balance || 0) >= 0 ? '#27ae60' : '#e74c3c';
-      doc.fillColor(balanceColor).text(`Balance: Bs ${(evento.presupuesto.balance || 0).toFixed(2)}`, { bold: true });
+    // ===== 10. PRESUPUESTO (tablas) =====
+    const tablaFilas = (filas) => {
+      asegurarPagina(60);
+      let y = doc.y;
+      doc.fontSize(9).fillColor('#666666');
+      doc.text('Descripción', 50, y, { width: 220, lineBreak: false });
+      doc.text('Cant.', 280, y, { width: 50, align: 'right', lineBreak: false });
+      doc.text('Precio', 340, y, { width: 80, align: 'right', lineBreak: false });
+      doc.text('Total', 430, y, { width: 90, align: 'right', lineBreak: false });
+      doc.y = y + 14;
+      doc.strokeColor('#cccccc').moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+      doc.moveDown(0.3);
+      filas.forEach(f => {
+        asegurarPagina(20);
+        const yy = doc.y;
+        doc.fontSize(9).fillColor('#000000');
+        doc.text(f.descripcion || '—', 50, yy, { width: 220, lineBreak: false });
+        doc.text(String(f.cantidad || 1), 280, yy, { width: 50, align: 'right', lineBreak: false });
+        doc.text(`Bs ${parseFloat(f.precio_unitario || 0).toFixed(2)}`, 340, yy, { width: 80, align: 'right', lineBreak: false });
+        doc.text(`Bs ${parseFloat(f.total || 0).toFixed(2)}`, 430, yy, { width: 90, align: 'right', lineBreak: false });
+        doc.y = yy + 14;
+      });
+      doc.fontSize(10);
+      doc.moveDown(0.4);
+    };
+
+    if (presupuesto || egresos.length || ingresos.length) {
+      tituloSeccion('Presupuesto del Evento');
+      if (egresos.length) {
+        doc.fillColor('#e74c3c'); negrita('↓ Egresos'); doc.fillColor('#000000');
+        tablaFilas(egresos);
+        negrita(`TOTAL EGRESOS: Bs ${(presupuesto?.total_egresos || egresos.reduce((s, e) => s + parseFloat(e.total || 0), 0)).toFixed(2)}`);
+        doc.moveDown(0.4);
+      }
+      if (ingresos.length) {
+        doc.fillColor('#27ae60'); negrita('↑ Ingresos'); doc.fillColor('#000000');
+        tablaFilas(ingresos);
+        negrita(`TOTAL INGRESOS: Bs ${(presupuesto?.total_ingresos || ingresos.reduce((s, i) => s + parseFloat(i.total || 0), 0)).toFixed(2)}`);
+        doc.moveDown(0.4);
+      }
+      const balance = presupuesto?.balance ?? 0;
+      doc.fillColor(balance >= 0 ? '#27ae60' : '#e74c3c');
+      negrita(`BALANCE ECONÓMICO: Bs ${balance.toFixed(2)}`);
       doc.fillColor('#000000');
       doc.moveDown(1);
     }
 
-    // ✨ FIRMAS OFICIALES (espacio para imprimir)
-    if (doc.y < 620) {
-      doc.moveDown(2);
-      const y = doc.y;
-      doc.strokeColor('#000000');
-      doc.moveTo(80, y + 40).lineTo(250, y + 40).stroke();
-      doc.fontSize(9).fillColor('#333333').text('Firma del Responsable', 80, y + 45, { width: 170, align: 'center' });
-      doc.moveTo(350, y + 40).lineTo(520, y + 40).stroke();
-      doc.text('Vo. Bo. DAF', 350, y + 45, { width: 170, align: 'center' });
-    }
+    // ===== 11. FIRMAS OFICIALES =====
+    asegurarPagina(120);
+    doc.moveDown(2);
+    const yF = doc.y;
+    doc.strokeColor('#000000');
+    doc.moveTo(80, yF + 40).lineTo(250, yF + 40).stroke();
+    doc.fontSize(9).fillColor('#333333').text('Firma del Responsable', 80, yF + 45, { width: 170, align: 'center' });
+    doc.moveTo(350, yF + 40).lineTo(520, yF + 40).stroke();
+    doc.text('Vo. Bo. DAF', 350, yF + 45, { width: 170, align: 'center' });
 
-    // PIE DE PÁGINA
-    const pageCount = doc.bufferedPageCount;
-    for (let i = 0; i < pageCount; i++) {
+    // ===== PIE DE PÁGINA =====
+    const pages = doc.bufferedPageCount;
+    for (let i = 0; i < pages; i++) {
       doc.switchToPage(i);
       doc.fontSize(8).fillColor('#999999')
-        .text(`Documento generado el ${new Date().toLocaleString('es-ES')} - UNIFRANZ`, 
-          50, 750, { align: 'center', width: 500 });
+        .text(`Documento generado el ${new Date().toLocaleString('es-ES')} - UNIFRANZ`, 50, 780, { align: 'center', width: 500 });
     }
 
     doc.end();
