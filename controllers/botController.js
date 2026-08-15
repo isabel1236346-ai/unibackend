@@ -360,7 +360,7 @@ async function generarPDFEvento(evento, usuario) {
     if (clasif || subcat) {
       tituloSeccion('Clasificación Estratégica');
       const txt = [
-        clasif?.nombreClasificacion || clasif?.nombre_clasificacion || '',
+        clasif?.nombreClasificacion || clasif?.nombreClasificacion || '',
         subcat?.nombreSubcategoria || subcat?.nombre_subcategoria || clasif?.nombresubcategoria || ''
       ].filter(Boolean).join(' - ');
       doc.text(`• ${txt || 'Sin clasificación'}`);
