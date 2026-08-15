@@ -299,15 +299,16 @@ async function generarPDFEvento(evento, usuario) {
     stream.on('data', (chunk) => buffers.push(chunk));
     stream.on('end', () => resolve(Buffer.concat(buffers)));
 
-    // ENCABEZADO
+    // ENCABEZADO INSTITUCIONAL
     doc.fontSize(24).fillColor('#E95A0C').text('UNIFRANZ', { align: 'center' });
     doc.fontSize(11).fillColor('#333333').text('Ficha Técnica del Evento', { align: 'center' });
     doc.moveDown(0.5);
     doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke('#E95A0C');
     doc.moveDown(1);
 
-    // TÍTULO DEL EVENTO
-    doc.fontSize(18).fillColor('#1e293b').text(evento.nombreevento || 'Sin nombre', { align: 'center' });
+    // ✨ TÍTULO DEL EVENTO EN MAYÚSCULAS
+    const tituloEvento = (evento.nombreevento || 'Sin nombre').toUpperCase();
+    doc.fontSize(18).fillColor('#1e293b').text(tituloEvento, { align: 'center' });
     doc.moveDown(1);
 
     // DATOS GENERALES
@@ -319,10 +320,23 @@ async function generarPDFEvento(evento, usuario) {
       new Date(evento.fechaevento).toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' }) : 'No definida';
     
     doc.text(`Fecha: ${fechaEvento}`);
-    doc.text(`Hora: ${evento.horaevento || 'No definida'}`);
+    
+    // ✨ HORA LIMPIA (sin segundos)
+    const horaLimpia = evento.horaevento ? evento.horaevento.toString().substring(0, 5) : 'No definida';
+    doc.text(`Hora: ${horaLimpia}`);
+    
     doc.text(`Lugar: ${evento.lugarevento || 'No definido'}`);
     doc.text(`Estado: ${evento.estado?.toUpperCase() || 'N/A'}`);
     doc.text(`Responsable: ${evento.responsable_evento || 'No asignado'}`);
+    
+    // ✨ ORGANIZADOR Y FACULTAD
+    if (usuario) {
+      const organizador = [usuario.nombre, usuario.apellidopat, usuario.apellidomat].filter(Boolean).join(' ').trim();
+      if (organizador) doc.text(`Organizador: ${organizador}`);
+      if (usuario.academico?.facultad?.nombre_facultad) {
+        doc.text(`Facultad: ${usuario.academico.facultad.nombre_facultad}`);
+      }
+    }
     doc.moveDown(1);
 
     // DESCRIPCIÓN
@@ -389,6 +403,18 @@ async function generarPDFEvento(evento, usuario) {
       const balanceColor = (evento.presupuesto.balance || 0) >= 0 ? '#27ae60' : '#e74c3c';
       doc.fillColor(balanceColor).text(`Balance: Bs ${(evento.presupuesto.balance || 0).toFixed(2)}`, { bold: true });
       doc.fillColor('#000000');
+      doc.moveDown(1);
+    }
+
+    // ✨ FIRMAS OFICIALES (espacio para imprimir)
+    if (doc.y < 620) {
+      doc.moveDown(2);
+      const y = doc.y;
+      doc.strokeColor('#000000');
+      doc.moveTo(80, y + 40).lineTo(250, y + 40).stroke();
+      doc.fontSize(9).fillColor('#333333').text('Firma del Responsable', 80, y + 45, { width: 170, align: 'center' });
+      doc.moveTo(350, y + 40).lineTo(520, y + 40).stroke();
+      doc.text('Vo. Bo. DAF', 350, y + 45, { width: 170, align: 'center' });
     }
 
     // PIE DE PÁGINA
@@ -403,6 +429,7 @@ async function generarPDFEvento(evento, usuario) {
     doc.end();
   });
 }
+
 async function askGemini(userMessage, senderInfo = 'Invitado', eventosContexto = "", history = []) {
   const SYSTEM_PROMPT = `Eres el asistente virtual de gestión de eventos de la UNIFRANZ.
 📌 REGLAS:
