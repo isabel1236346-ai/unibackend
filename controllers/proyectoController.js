@@ -1326,12 +1326,15 @@ const getEventosVencidos = asyncHandler(async (req, res) => {
       if (condiciones.length > 0) {
         eventos = await Evento.findAll({
           where: {
-            fechaevento: { [Op.lt]: hoy },
-            [Op.and]: [
-              { [Op.or]: [{ estado: 'aprobado' }, { estado: 'pendiente' }] },
-              { [Op.or]: condiciones }
-            ]
-          },
+            [Op.or]: [
+                { estado: 'aprobado' },
+                { estado: 'pendiente' },
+                { estado: 'vencido' },       // ✅ AGREGADO
+                { estado: 'finalizado' },    // ✅ AGREGADO
+                { estado: 'completado' }
+              ],
+              fechaevento: { [Op.lt]: hoy }
+            },
           include: [
             {
               model: User,
@@ -1440,6 +1443,7 @@ const getEventosAprobadosPorFacultad = asyncHandler(async (req, res) => {
     }
 
     let eventos = [];
+     const estadosPermitidos = { [Op.in]: ['aprobado', 'vencido', 'finalizado', 'completado'] };
 
     if (userRole === 'admin' || userRole === 'daf') {
       console.log('👑 Admin/DAF: Obteniendo TODOS los eventos aprobados');
@@ -1471,7 +1475,7 @@ const getEventosAprobadosPorFacultad = asyncHandler(async (req, res) => {
       }
       console.log('👨‍ Académico: Filtrando por facultad_id:', facultadId);
       eventos = await Evento.findAll({
-        where: { estado: 'aprobado' },
+        where: { estado: estadosPermitidos },
         distinct: true,
         include: [{
           model: User,
@@ -1501,7 +1505,7 @@ const getEventosAprobadosPorFacultad = asyncHandler(async (req, res) => {
       }
       console.log('🎓 Estudiante: Filtrando por facultad_id:', facultadId);
       eventos = await Evento.findAll({
-        where: { estado: 'aprobado' },
+        where: { estado: estadosPermitidos },
         distinct: true,
         attributes: { include: ['idfase'] },
         include: [{
