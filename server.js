@@ -104,6 +104,7 @@ const startServer = async () => {
     app.use('/estudiantes',   require('./routes/estudiantesRoutes.js'));
     app.use('/bot',           require('./routes/botRoutes.js'));
     app.use('/daf',           require('./routes/dafRoutes.js'));
+    app.use('/predictions',   require('./routes/predictionRoutes.js'));
     const chatSocket = require('./sockets/chatSocket.js');
     chatSocket(io);
     app.get('/health', (req, res) => {

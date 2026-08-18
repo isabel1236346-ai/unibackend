@@ -1,7 +1,29 @@
 const cron = require('node-cron');
 const { getModels } = require('../models/index');
 const { Op } = require('sequelize');
-// const botService = require('../services/botService'); // Si usas bot
+const predictionService = require('../services/predictionService');
+
+cron.schedule('0 8 * * *', async () => {
+  console.log('🤖 Ejecutando análisis predictivo de asistencia...');
+  try {
+    const analisis = await predictionService.generarAnalisisCompleto();
+    console.log(`✅ Análisis completado para ${analisis.length} eventos`);
+    
+    // Aquí puedes enviar notificaciones por Telegram o Socket
+    // si algún evento tiene baja predicción de asistencia
+    analisis.forEach(evento => {
+      if (evento.tasa_asistencia_esperada !== 'N/A') {
+        const tasa = parseFloat(evento.tasa_asistencia_esperada);
+        if (tasa < 50) {
+          console.log(`⚠️ Alerta: Evento "${evento.titulo}" tiene baja asistencia esperada (${evento.tasa_asistencia_esperada})`);
+          // Aquí llamarías a tu servicio de notificaciones
+        }
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error en cron de predicciones:', error);
+  }
+});
 
 const marcarEventosVencidos = async () => {
   console.log('🔄 [CRON] Iniciando revisión...');
