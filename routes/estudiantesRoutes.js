@@ -25,6 +25,6 @@ router.get('/:idusuario', protect1, getEstudiantes);
 router.get('/:id', protect, getEstudianteById);
 router.put('/:id', protect, updateEstudiante);
 router.delete('/:id', protect, deleteEstudiante);
-router.post('/:id/registrar', protect, registrarEventoEstudiante);
+//router.post('/:id/registrar', protect, registrarEventoEstudiante);
 
 module.exports = router;

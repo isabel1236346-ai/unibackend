@@ -19,6 +19,7 @@ const  {
   getEventosVencidos,
   //getEventosPendientesPorArea
   } = require('../controllers/proyectoController.js');
+const { registrarEventoEstudiante } = require('../controllers/estudiantesController.js');
 const {enviarNotificacionTelegram} = require('../controllers/botController.js');
 const  {protect,authorize,protect1} = require('../middleware/authMiddleware.js');
 const { getInformeEvento,guardarInformeEvento } = require('../controllers/informeEventoController.js');
@@ -54,6 +55,7 @@ router.get('/:id',protect, getEventoById);
 
 router.get('/:id/informe', protect, getInformeEvento);
 router.post('/:id/informe', protect, guardarInformeEvento);
+router.post('/:id/registrar', protect, registrarEventoEstudiante);
 //router.get('/mios/aprobados',protect, getAprobados);
 
 
