@@ -446,6 +446,34 @@ const getEstudiantesInscritosEvento = async (req, res) => {
     return res.status(500).json({ message: 'Error al obtener inscritos', error: error.message });
   }
 };
+const actualizarDatosInscripcion = asyncHandler(async (req, res) => {
+  const { codigoestudiante, semestre, telefono } = req.body;
+
+  if (!codigoestudiante || !semestre || !telefono) {
+    return res.status(400).json({ message: 'Faltan datos: codigoestudiante, semestre y telefono son requeridos' });
+  }
+
+  try {
+    const models = getModels();
+    const { Estudiante } = models;
+
+    const estudiante = await Estudiante.findOne({ where: { idusuario: req.user.idusuario } });
+
+    if (!estudiante) {
+      return res.status(404).json({ message: 'No se encontró el registro de estudiante para este usuario' });
+    }
+
+    await estudiante.update({ codigoestudiante, semestre, telefono });
+
+    res.json({
+      message: 'Datos actualizados correctamente',
+      estudiante: await estudiante.reload({ raw: true }),
+    });
+  } catch (error) {
+    console.error('Error al actualizar datos de inscripción:', error);
+    res.status(500).json({ message: 'Error interno del servidor', error: error.message });
+  }
+});
 module.exports = {
   getEstudiantes,
   getAllEstudiantes,
@@ -455,5 +483,6 @@ module.exports = {
   deleteEstudiante,
   getEventosPorFacultadEstudiante,
   estudiantesInscritosEnEvento,
-  getEstudiantesInscritosEvento
+  getEstudiantesInscritosEvento,
+  actualizarDatosInscripcion
 };
