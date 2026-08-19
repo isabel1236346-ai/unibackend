@@ -474,6 +474,26 @@ const actualizarDatosInscripcion = asyncHandler(async (req, res) => {
     res.status(500).json({ message: 'Error interno del servidor', error: error.message });
   }
 });
+const misInscripciones = asyncHandler(async (req, res) => {
+  try {
+    const models = getModels();
+    const sequelize = models.sequelize;
+    const idUsuario = req.user.idusuario;
+
+    const inscripciones = await sequelize.query(
+      `SELECT ei.idevento
+       FROM evento_inscripciones ei
+       JOIN estudiante est ON est.idestudiante = ei.idestudiante
+       WHERE est.idusuario = :idUsuario`,
+      { replacements: { idUsuario }, type: sequelize.QueryTypes.SELECT }
+    );
+
+    res.json({ eventosInscritos: inscripciones.map(r => r.idevento) });
+  } catch (error) {
+    console.error('Error al obtener mis inscripciones:', error);
+    res.status(500).json({ message: 'Error al obtener inscripciones', error: error.message });
+  }
+});
 module.exports = {
   getEstudiantes,
   getAllEstudiantes,
@@ -484,5 +504,6 @@ module.exports = {
   getEventosPorFacultadEstudiante,
   estudiantesInscritosEnEvento,
   getEstudiantesInscritosEvento,
-  actualizarDatosInscripcion
+  actualizarDatosInscripcion,
+  misInscripciones
 };
