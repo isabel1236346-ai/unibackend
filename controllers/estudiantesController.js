@@ -424,10 +424,13 @@ const getEstudiantesInscritosEvento = async (req, res) => {
 
     const inscritos = await sequelize.query(
       `SELECT est.idestudiante, u.nombre, u.apellidopat, u.apellidomat, u.email,
+              est.codigoestudiante, est.semestre, est.telefono,
+              c.nombre_carrera AS carrera,
               ei.fecha_inscripcion
        FROM evento_inscripciones ei
        JOIN estudiante est ON est.idestudiante = ei.idestudiante
        JOIN usuario u ON u.idusuario = est.idusuario
+       LEFT JOIN carrera c ON c.idcarrera = est.idcarrera
        WHERE ei.idevento = :idevento
        ORDER BY ei.fecha_inscripcion ASC`,
       { replacements: { idevento }, type: sequelize.QueryTypes.SELECT }
@@ -437,6 +440,10 @@ const getEstudiantesInscritosEvento = async (req, res) => {
       idestudiante: row.idestudiante,
       nombre: `${row.nombre} ${row.apellidopat} ${row.apellidomat}`.trim(),
       email: row.email,
+      codigoestudiante: row.codigoestudiante,
+      carrera: row.carrera,
+      semestre: row.semestre,
+      telefono: row.telefono,
       fecha_inscripcion: row.fecha_inscripcion,
     }));
 
