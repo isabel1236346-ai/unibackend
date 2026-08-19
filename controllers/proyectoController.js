@@ -2367,7 +2367,6 @@ module.exports ={
     enviarNotificacionTelegram,
     getEventos,
     getEventosAprobadosPorFacultadYFecha,
-    registrarEventoEstudiante,
   estudiantesInscritosEnEvento,
   getEventosVencidos
 
