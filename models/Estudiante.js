@@ -9,10 +9,10 @@ module.exports = (sequelize,DataTypes)=>{
       autoIncrement: true,
       field: 'idestudiante'
     },
-    idusuario: { // Clave foránea que referencia a la tabla 'usuarios'
+    idusuario: { 
       type: DataTypes.INTEGER,
       allowNull: false,
-      unique: true // Un usuario solo puede ser un tipo de administrador
+      unique: true
     },
     nivelacceso: {
       type: DataTypes.INTEGER,
@@ -23,7 +23,7 @@ module.exports = (sequelize,DataTypes)=>{
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: 'facultad', // Nombre de la tabla en la BD
+        model: 'facultad',
         key: 'facultad_id'
       }
     },
@@ -34,7 +34,19 @@ module.exports = (sequelize,DataTypes)=>{
         model: 'carrera',
         key: 'idcarrera'
       }
-    }
+    },
+    codigoestudiante: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    semestre: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    telefono: {
+      type: DataTypes.INTEGER,
+      allowNull: false
+    },
   }, {
     tableName: 'estudiante',
     timestamps: false 
