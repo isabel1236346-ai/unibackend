@@ -44,6 +44,7 @@ async function esResponsableDelEvento(evento, usuario, models) {
   return false;
 }
 
+
 const getInformeEvento = async (req, res) => {
   console.log('🔍 [getInformeEvento] Iniciando para evento ID:', req.params.id);
   try {
@@ -78,22 +79,15 @@ const getInformeEvento = async (req, res) => {
       informe = null;
     }
 
-    // 2. OBTENER LOS DATOS DE LA TABLA RESULTADO (incluyendo los 3 campos nuevos)
     let resultado;
     try {
       resultado = await Resultado.findOne({ where: { idevento } });
       console.log('📊 Resultado encontrado:', resultado ? 'SÍ' : 'NO');
-      if (resultado) {
-        console.log('   - info_prensa:', resultado.info_prensa);
-        console.log('   - analisis_desviaciones:', resultado.analisis_desviaciones);
-        console.log('   - lecciones_aprendidas:', resultado.lecciones_aprendidas);
-      }
     } catch (resultadoError) {
       console.error('❌ Error buscando resultado:', resultadoError.message);
       resultado = null;
     }
 
-    // 3. Obtener egresos, ingresos y presupuesto
     let egresos = [];
     let ingresos = [];
     let presupuesto = {};
@@ -124,29 +118,27 @@ const getInformeEvento = async (req, res) => {
       balanceEsperado: Number(presupuesto?.balance || 0),
     };
 
-    // 4. SI EXISTE RESULTADO, AGREGAR LOS 3 CAMPOS AL OBJETO INFORME
+    // ✅ 1. PREPARAR EL OBJETO DE RESPUESTA (SIEMPRE, tenga o no informe)
+    const informeData = informe ? informe.toJSON() : {};
+
+    // ✅ 2. AGREGAR LOS CAMPOS DE TEXTO SI EXISTE RESULTADO
     if (resultado) {
-      if (!informe) {
-        // Si no hay informe pero sí resultado, creamos un objeto vacío
-        informe = {
-          info_prensa: resultado.info_prensa || null,
-          analisis_desviaciones: resultado.analisis_desviaciones || null,
-          lecciones_aprendidas: resultado.lecciones_aprendidas || null,
-        };
-      } else {
-        // Si existe informe, agregamos los campos
-        informe.info_prensa = resultado.info_prensa || null;
-        informe.analisis_desviaciones = resultado.analisis_desviaciones || null;
-        informe.lecciones_aprendidas = resultado.lecciones_aprendidas || null;
-      }
+      informeData.info_prensa = resultado.info_prensa || informeData.info_prensa || null;
+      informeData.analisis_desviaciones = resultado.analisis_desviaciones || informeData.analisis_desviaciones || null;
+      informeData.lecciones_aprendidas = resultado.lecciones_aprendidas || informeData.lecciones_aprendidas || null;
     }
 
+    // ✅ 3. ASEGURAR QUE LOS ARRAYS JSON SIEMPRE SE ENVÍEN (FUERA DEL IF)
+    informeData.egresos_reales = informeData.egresos_reales || [];
+    informeData.ingresos_reales = informeData.ingresos_reales || [];
+
     console.log('✅ [getInformeEvento] Respuesta enviada con éxito');
-    console.log('   - informe.info_prensa:', informe?.info_prensa);
-    console.log('   - informe.analisis_desviaciones:', informe?.analisis_desviaciones);
-    console.log('   - informe.lecciones_aprendidas:', informe?.lecciones_aprendidas);
+    console.log('   - egresos_reales enviados:', informeData.egresos_reales.length);
+    console.log('   - ingresos_reales enviados:', informeData.ingresos_reales.length);
     
-    return res.json({ esperado, informe });
+    // ✅ 4. UN SOLO RETURN AL FINAL, SIEMPRE DEVOLVIENDO `informeData`
+    return res.json({ esperado, informe: informeData });
+
   } catch (error) {
     console.error('❌ ERROR CRÍTICO en getInformeEvento:', error.message);
     console.error('Stack:', error.stack);
@@ -154,7 +146,7 @@ const getInformeEvento = async (req, res) => {
   }
 };
 
-// POST /eventos/:id/informe
+
 const guardarInformeEvento = async (req, res) => {
   console.log('💾 [guardarInformeEvento] Iniciando guardado para evento ID:', req.params.id);
   
@@ -210,6 +202,10 @@ const guardarInformeEvento = async (req, res) => {
       participacion_real: participacion_real || null,
       indice_satisfaccion_real: indice_satisfaccion_real || null,
       otros_resultados_real: otros_resultados_real || null,
+      
+      egresos_reales: egresosArr,
+      ingresos_reales: ingresosArr,
+
       total_egresos_real: totalEgresosReal,
       total_ingresos_real: totalIngresosReal,
       balance_real: balanceReal,
