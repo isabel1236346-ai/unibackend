@@ -9,7 +9,8 @@ const {
   estudiantesInscritosEnEvento,
   getEstudiantesInscritosEvento,
   actualizarDatosInscripcion,
-  misInscripciones
+  misInscripciones,
+  registrarEventoEstudiante
 } = require('../controllers/estudiantesController.js');
 const { protect,protect1 } = require('../middleware/authMiddleware.js');
 
@@ -24,5 +25,6 @@ router.get('/:idusuario', protect1, getEstudiantes);
 router.get('/:id', protect, getEstudianteById);
 router.put('/:id', protect, updateEstudiante);
 router.delete('/:id', protect, deleteEstudiante);
+router.post('/:id/registrar', protect, registrarEventoEstudiante);
 
 module.exports = router;

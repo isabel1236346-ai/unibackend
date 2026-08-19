@@ -285,6 +285,39 @@ const deleteEstudiante = asyncHandler(async (req, res) => {
     res.status(500).json({ message: 'Error interno del servidor' });
   }
 });
+const registrarEventoEstudiante = asyncHandler(async (req, res) => {
+
+  const models = getModels();
+  const { Estudiante, Evento } = models;
+
+  const idevento = req.params.id;
+
+  const estudiante = await Estudiante.findOne({ where: { idusuario: req.user.idusuario } });
+  if (!estudiante) {
+    return res.status(404).json({ error: 'Perfil de estudiante no encontrado' });
+  }
+
+  const evento = await Evento.findByPk(idevento);
+  if (!evento) {
+    return res.status(404).json({ error: 'Evento no encontrado' });
+  }
+
+  const [rows] = await models.sequelize.query(
+    `SELECT 1 FROM evento_inscripciones WHERE idevento = :idevento AND idestudiante = :idestudiante`,
+    { replacements: { idevento, idestudiante: estudiante.idEstudiante } }
+  );
+
+  if (rows.length > 0) {
+    return res.status(409).json({ error: 'Ya estás inscrito en este evento' });
+  }
+
+  await models.sequelize.query(
+    `INSERT INTO evento_inscripciones (idevento, idestudiante) VALUES (:idevento, :idestudiante)`,
+    { replacements: { idevento, idestudiante: estudiante.idEstudiante } }
+  );
+
+  res.status(201).json({ message: 'Inscripción exitosa' });
+});
 
 const getEventosPorFacultadEstudiante = asyncHandler(async (req, res) => {
   const models = getModels();
@@ -512,5 +545,6 @@ module.exports = {
   estudiantesInscritosEnEvento,
   getEstudiantesInscritosEvento,
   actualizarDatosInscripcion,
-  misInscripciones
+  misInscripciones,
+  registrarEventoEstudiante
 };
