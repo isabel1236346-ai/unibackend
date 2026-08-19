@@ -521,14 +521,16 @@ const misInscripciones = asyncHandler(async (req, res) => {
     const idUsuario = req.user.idusuario;
 
     const inscripciones = await sequelize.query(
-      `SELECT ei.idevento
+      `SELECT e.idevento, e.nombreevento, e.fechaevento, e.horaevento, e.lugarevento, e.estado
        FROM evento_inscripciones ei
        JOIN estudiante est ON est.idestudiante = ei.idestudiante
-       WHERE est.idusuario = :idUsuario`,
+       JOIN evento e ON e.idevento = ei.idevento
+       WHERE est.idusuario = :idUsuario
+       ORDER BY e.fechaevento DESC`,
       { replacements: { idUsuario }, type: sequelize.QueryTypes.SELECT }
     );
 
-    res.json({ eventosInscritos: inscripciones.map(r => r.idevento) });
+    res.json({ eventos: inscripciones });
   } catch (error) {
     console.error('Error al obtener mis inscripciones:', error);
     res.status(500).json({ message: 'Error al obtener inscripciones', error: error.message });
