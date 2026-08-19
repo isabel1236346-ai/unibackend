@@ -467,7 +467,7 @@ const actualizarDatosInscripcion = asyncHandler(async (req, res) => {
 
     res.json({
       message: 'Datos actualizados correctamente',
-      estudiante: await estudiante.reload({ raw: true }),
+      estudiante: estudiante.toJSON(),
     });
   } catch (error) {
     console.error('Error al actualizar datos de inscripción:', error);
