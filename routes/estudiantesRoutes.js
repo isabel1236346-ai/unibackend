@@ -6,13 +6,15 @@ const {
   updateEstudiante,
   deleteEstudiante,
   getEventosPorFacultadEstudiante,
-  estudiantesInscritosEnEvento
+  estudiantesInscritosEnEvento,
+  getEstudiantesInscritosEvento
 } = require('../controllers/estudiantesController.js');
 const { protect,protect1 } = require('../middleware/authMiddleware.js');
 
 const router = express.Router();
 router.get('/facultad/:idfacultad', protect1, getEventosPorFacultadEstudiante);
 router.get('/estudiantes-inscritos-facultad',protect, estudiantesInscritosEnEvento);
+router.get('/estudiantes-inscritos-evento/:id', protect, getEstudiantesInscritosEvento);
 
 router.get('/', protect, getAllEstudiantes);
 router.get('/:idusuario', protect1, getEstudiantes);

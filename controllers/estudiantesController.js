@@ -412,6 +412,40 @@ const estudiantesInscritosEnEvento = asyncHandler(async (req, res) => {
     res.status(500).json({ error: 'Error al obtener estudiantes inscritos', details: error.message });
   }
 });
+const getEstudiantesInscritosEvento = async (req, res) => {
+  try {
+    const models = getModels();
+    const sequelize = models.sequelize;
+    const idevento = Number(req.params.id);
+
+    if (isNaN(idevento)) {
+      return res.status(400).json({ message: 'ID de evento inválido' });
+    }
+
+    const inscritos = await sequelize.query(
+      `SELECT est.idestudiante, u.nombre, u.apellidopat, u.apellidomat, u.email,
+              ei.fecha_inscripcion
+       FROM evento_inscripciones ei
+       JOIN estudiante est ON est.idestudiante = ei.idestudiante
+       JOIN usuario u ON u.idusuario = est.idusuario
+       WHERE ei.idevento = :idevento
+       ORDER BY ei.fecha_inscripcion ASC`,
+      { replacements: { idevento }, type: sequelize.QueryTypes.SELECT }
+    );
+
+    const estudiantes = inscritos.map(row => ({
+      idestudiante: row.idestudiante,
+      nombre: `${row.nombre} ${row.apellidopat} ${row.apellidomat}`.trim(),
+      email: row.email,
+      fecha_inscripcion: row.fecha_inscripcion,
+    }));
+
+    return res.json({ idevento, total: estudiantes.length, estudiantes });
+  } catch (error) {
+    console.error('❌ Error en getEstudiantesInscritosEvento:', error);
+    return res.status(500).json({ message: 'Error al obtener inscritos', error: error.message });
+  }
+};
 module.exports = {
   getEstudiantes,
   getAllEstudiantes,
@@ -420,5 +454,6 @@ module.exports = {
   updateEstudiante,
   deleteEstudiante,
   getEventosPorFacultadEstudiante,
-  estudiantesInscritosEnEvento
+  estudiantesInscritosEnEvento,
+  getEstudiantesInscritosEvento
 };
