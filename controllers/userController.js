@@ -812,41 +812,28 @@ const unlinkTelegram = asyncHandler(async (req, res) => {
   }
 });
 
- const getProfile = asyncHandler(async (req, res) => {
-  
-    if (!req.user.idusuario) {
+const getProfile = asyncHandler(async (req, res) => {
+  if (!req.user.idusuario) {
     return res.status(401).json({ message: 'No autorizado: usuario no autenticado' });
   }
 
   const userId = req.user.idusuario;
-  if (!userId) {
-    console.error('req.user no tiene idusuario:', req.user);
-    return res.status(500).json({ message: 'Error: usuario autenticado sin ID válido' });
-  }
-
   const models = getModels();
-  const { User, Facultad, Estudiante } = models; // o 'User', según el nombre real de tu modelo
+  const { User, Facultad, Estudiante } = models;
 
   try {
-    const user = await User.findByPk(userId,{
+    // 1. Obtener el usuario con su facultad
+    const user = await User.findByPk(userId, {
       attributes: [
-        'idusuario', 'nombre', 'apellidopat',
-        'apellidomat', 'email', 'role', 'facultad_id', 'telegram_chat_id', 'telegram_username',
-        'theme','color_acento'
+        'idusuario', 'nombre', 'apellidopat', 'apellidomat', 'email', 'role',
+        'facultad_id', 'telegram_chat_id', 'telegram_username', 'theme', 'color_acento'
       ],
       include: [
         {
           model: Facultad,
-          as: 'facultad', // debe coincidir con el alias de la asociación
+          as: 'facultad',
           attributes: ['nombre_facultad']
-        },
-        {
-          model: Estudiante,
-          as: 'estudiante', 
-          attributes: ['codigoestudiante', 'semestre', 'telefono', 'idcarrera'],
-          required: false 
         }
-
       ]
     });
 
@@ -854,6 +841,16 @@ const unlinkTelegram = asyncHandler(async (req, res) => {
       return res.status(404).json({ message: 'Usuario no encontrado' });
     }
 
+    // 2. Consulta SEPARADA para obtener datos de estudiante (sin usar include)
+    let estudianteData = null;
+    if (user.role === 'student') {
+      estudianteData = await Estudiante.findOne({
+        where: { idusuario: userId },
+        attributes: ['codigoestudiante', 'semestre', 'telefono', 'idcarrera']
+      });
+    }
+
+    // 3. Construir la respuesta combinando ambos resultados
     res.json({
       id: user.idusuario,
       nombre: user.nombre,
@@ -865,22 +862,22 @@ const unlinkTelegram = asyncHandler(async (req, res) => {
       facultad_id: user.facultad_id,
       telegram_chat_id: user.telegram_chat_id,
       telegram_username: user.telegram_username,
-      theme: user.theme || 'light', 
+      theme: user.theme || 'light',
       color_acento: user.color_acento || '#E95A0C',
-      codigoestudiante: user.estudiante?.codigoestudiante || null,
-      semestre: user.estudiante?.semestre || null,
-      telefono: user.estudiante?.telefono || null,
-      idcarrera: user.estudiante?.idcarrera || null 
+      // Datos de estudiante (pueden ser null si no existe el registro)
+      codigoestudiante: estudianteData?.codigoestudiante || null,
+      semestre: estudianteData?.semestre || null,
+      telefono: estudianteData?.telefono || null,
+      idcarrera: estudianteData?.idcarrera || null
     });
 
   } catch (error) {
     console.error('Error al obtener perfil:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       message: 'Error al obtener el perfil del usuario',
-      error: error.message 
+      error: error.message
     });
   }
-  
 });
 const getFacultades = asyncHandler(async(req,res)=>{
 try{
