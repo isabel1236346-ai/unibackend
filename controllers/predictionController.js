@@ -1,13 +1,10 @@
-// src/controllers/predictionController.js
+const asyncHandler = require('express-async-handler');
+const { Op,QueryTypes } = require('sequelize');
 const predictionService = require('../services/predictionService');
 
-class PredictionController {
 
-  /**
-   * POST /api/predictions/predict
-   * Predice la asistencia de un evento específico
-   */
-  async predecir(req, res) {
+  const predecir = asyncHandler (async(req, res) => {
+  //async predecir(req, res) {
     try {
       const { evento_id, tipo, facultad, fecha } = req.body;
       
@@ -30,12 +27,13 @@ class PredictionController {
       res.status(500).json({ error: 'Error al generar predicción' });
     }
   }
+);
 
   /**
    * GET /api/predictions/analysis
    * Genera análisis completo para el dashboard
    */
-  async analisisCompleto(req, res) {
+  const analisisCompleto = asyncHandler(async (req, res) => {
     try {
       const analisis = await predictionService.generarAnalisisCompleto();
       
@@ -49,6 +47,9 @@ class PredictionController {
       res.status(500).json({ error: 'Error al generar análisis' });
     }
   }
-}
+);
 
-module.exports = new PredictionController();
+module.exports = {
+  predecir,
+  analisisCompleto
+};
