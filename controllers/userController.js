@@ -825,7 +825,7 @@ const unlinkTelegram = asyncHandler(async (req, res) => {
   }
 
   const models = getModels();
-  const { User, Facultad } = models; // o 'User', según el nombre real de tu modelo
+  const { User, Facultad, Estudiante } = models; // o 'User', según el nombre real de tu modelo
 
   try {
     const user = await User.findByPk(userId,{
@@ -839,7 +839,14 @@ const unlinkTelegram = asyncHandler(async (req, res) => {
           model: Facultad,
           as: 'facultad', // debe coincidir con el alias de la asociación
           attributes: ['nombre_facultad']
+        },
+        {
+          model: Estudiante,
+          as: 'estudiante', 
+          attributes: ['codigoestudiante', 'semestre', 'telefono', 'idcarrera'],
+          required: false 
         }
+
       ]
     });
 
@@ -858,8 +865,12 @@ const unlinkTelegram = asyncHandler(async (req, res) => {
       facultad_id: user.facultad_id,
       telegram_chat_id: user.telegram_chat_id,
       telegram_username: user.telegram_username,
-      theme: user.theme || 'light', // Valor por defecto si no está definido
-      color_acento: user.color_acento || '#E95A0C' // Valor por defecto si no está definido
+      theme: user.theme || 'light', 
+      color_acento: user.color_acento || '#E95A0C',
+      codigoestudiante: user.estudiante?.codigoestudiante || null,
+      semestre: user.estudiante?.semestre || null,
+      telefono: user.estudiante?.telefono || null,
+      idcarrera: user.estudiante?.idcarrera || null 
     });
 
   } catch (error) {
