@@ -897,8 +897,11 @@ const deleteEvento = async (req, res) => {
   }
 };
 const aprobarEvento = async (req, res) => {
-  const { idevento } = req.params.idevento || req.body.idevento;
   try {
+    const { idevento } = req.params.idevento || req.body.idevento;
+    if (!idevento) {
+      return res.status(400).json({ error: 'El ID del evento es requerido' });
+    }
     const models = getModels();
     const { Evento } = models;
 
@@ -919,7 +922,8 @@ const aprobarEvento = async (req, res) => {
     }
 
     await evento.update({ 
-      estado: 'aprobado', fecha_aprobacion: new Date()
+      estado: 'aprobado',
+       fecha_aprobacion: new Date()
     });
      await enviarNotificacionTelegram({ idevento }, 'aprobado');
 
@@ -947,7 +951,9 @@ const aprobarEvento = async (req, res) => {
         : evento.responsable_evento || 'No especificado'
     };
 
-    enviarNotificacionTelegram(eventoParaNotificar, 'aprobado');
+      enviarNotificacionTelegram(eventoParaNotificar, 'aprobado').catch(err => 
+      console.warn('⚠️ Error en notificación Telegram:', err.message)
+    );
 
 
     return res.status(200).json({ message: 'Evento aprobado correctamente' });
@@ -958,12 +964,15 @@ const aprobarEvento = async (req, res) => {
 };
 
 const rechazarEvento = async (req, res) => {
-  const { idevento } = req.params.idevento || req.body.idevento;
   try {
-    const models = getModels();
-    const { Evento, Academico, User } = models;
+    const { idevento } = req.params.idevento || req.body.idevento;
+    if (!idevento) {
+      return res.status(400).json({ error: 'El ID del evento es requerido' });
+    }
+  const models = getModels();
+  const { Evento, Academico, User } = models;
 
-    const evento = await Evento.findByPk(id, {
+    const evento = await Evento.findByPk(idevento, {
       include: [
         { 
           model: Academico, 
@@ -997,7 +1006,9 @@ const rechazarEvento = async (req, res) => {
       razon_rechazo: razonRechazo
     });
 
-    await enviarNotificacionTelegram({ idevento }, 'rechazado');
+    await enviarNotificacionTelegram({ idevento }, 'rechazado').catch(err => {
+      console.warn('⚠️ Error en notificación Telegram:', err.message);
+    });
     if (evento.idacademico) {
       try {
         const mensaje = `Tu evento "${evento.nombreevento}" fue rechazado. Motivo: ${razonRechazo}`;
@@ -1020,7 +1031,7 @@ const rechazarEvento = async (req, res) => {
     // ✅ RESPUESTA AL FRONTEND
     return res.status(200).json({ 
       message: 'Evento rechazado correctamente',
-      idevento: id,
+      idevento: idevento,
       estado: 'rechazado'
     });
 
