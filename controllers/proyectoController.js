@@ -898,7 +898,11 @@ const deleteEvento = async (req, res) => {
 };
 const aprobarEvento = async (req, res) => {
   try {
-    const  idevento = req.params.idevento || req.body.idevento;
+    console.log('🔍 [aprobarEvento] req.params:', req.params);
+    console.log('🔍 [aprobarEvento] req.body:', req.body);
+    console.log('🔍 [aprobarEvento] req.url:', req.url);
+
+    const idevento = req.params.id || req.params.idevento || req.body.id || req.body.idevento;
     if (!idevento) {
       return res.status(400).json({ error: 'El ID del evento es requerido' });
     }
@@ -965,7 +969,7 @@ const aprobarEvento = async (req, res) => {
 
 const rechazarEvento = async (req, res) => {
   try {
-    const  idevento = req.params.idevento || req.body.idevento;
+    const  idevento = req.params.id || req.params.idevento || req.body.id || req.body.idevento;
     if (!idevento) {
       return res.status(400).json({ error: 'El ID del evento es requerido' });
     }
