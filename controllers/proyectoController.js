@@ -897,13 +897,13 @@ const deleteEvento = async (req, res) => {
   }
 };
 const aprobarEvento = async (req, res) => {
-  const { id } = req.params;
+  const { idevento } = req.params.idevento || req.body.idevento;
   try {
     const models = getModels();
     const { Evento } = models;
 
 
-    const evento = await Evento.findByPk(id, {
+    const evento = await Evento.findByPk(idevento, {
   include: [
     { 
       model: models.Academico, 
@@ -958,7 +958,7 @@ const aprobarEvento = async (req, res) => {
 };
 
 const rechazarEvento = async (req, res) => {
-  const { id } = req.params;
+  const { idevento } = req.params.idevento || req.body.idevento;
   try {
     const models = getModels();
     const { Evento, Academico, User } = models;
