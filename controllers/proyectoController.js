@@ -1047,6 +1047,52 @@ const rechazarEvento = async (req, res) => {
     });
   }
 };
+const finalizarInformeEvento = asyncHandler(async (req, res) => {
+  const models = getModels();
+  const { Evento, Fase } = models;
+  const { id } = req.params;
+  const idevento = parseInt(id, 10);
+
+  if (isNaN(idevento) || idevento <= 0) {
+    return res.status(400).json({ message: 'ID de evento inválido' });
+  }
+
+  try {
+    // 1. Verificar que la fase 3 existe en tu catálogo de fases
+    const fase3 = await Fase.findOne({ where: { nrofase: 3 } });
+    if (!fase3) {
+      return res.status(400).json({ message: 'La fase 3 no está configurada en el sistema' });
+    }
+
+    // 2. Actualizar el evento: cambiar a fase 3 y (opcionalmente) estado a 'finalizado'
+    const [updatedRows] = await Evento.update(
+      { 
+        idfase: fase3.idfase,
+        estado: 'finalizado', // Ajusta esto si tu estado se llama diferente
+        updated_at: new Date()
+      },
+      { where: { idevento } }
+    );
+
+    if (updatedRows === 0) {
+      return res.status(404).json({ message: 'Evento no encontrado' });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Informe finalizado correctamente. El evento ha pasado a Fase 3.',
+      data: { idevento, idfase: fase3.idfase, estado: 'finalizado' }
+    });
+
+  } catch (error) {
+    console.error('❌ Error al finalizar informe:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error al finalizar el informe del evento',
+      error: error.message
+    });
+  }
+});
 const getEventos = async (req, res) => {
   const models = getModels();
   const { Evento, User, Academico, Facultad } = models;
@@ -2383,7 +2429,8 @@ module.exports ={
     getEventos,
     getEventosAprobadosPorFacultadYFecha,
   estudiantesInscritosEnEvento,
-  getEventosVencidos
+  getEventosVencidos,
+  finalizarInformeEvento
 
     
 }

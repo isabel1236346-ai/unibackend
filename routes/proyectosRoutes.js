@@ -10,6 +10,7 @@ const {
   getFacultadById,
   getEstudianteFacultad,
   deleteEvento,
+  finalizarInformeEvento
 } = require('../controllers/proyectoController.js');
 const {
   sendNotification,
@@ -21,6 +22,7 @@ const {
 const router = express.Router();
 router.put('/:id/approve',protect,authorize('admin'), aprobarEvento);
 router.put('/:id/reject',protect,authorize('admin'), deleteEvento);
+router.put('/:id/finalizar-informe', protect, authorize('admin'), finalizarInformeEvento);
 router.get('/estudiantes/facultad/:idfacultad',getEstudianteFacultad) ;
 
 
